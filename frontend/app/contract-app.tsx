@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { BarChart3, Building2, CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Building2, FilePlus2, FileStack, CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table } from "@/components/ui/table";
@@ -10,9 +10,10 @@ import { ApprovalsPanel, CommentsPanel, HistoryPanel, ObligationsPanel, Versions
 import { AuditDetails, EmptyState, SectionHeader, Status, dateLabel, errorText } from "./shared";
 import { AdvancedFilters, TagEditor, Tags, activeFilterCount, emptyFilters, exportUrl, filterContracts, type Filters } from "./filters";
 import { ReportsView, VendorsView } from "./insights";
+import { NewContractModal, TemplatesView } from "./templates";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
-type View = "Overview" | "Contracts" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Audit trail" | "Users";
+type View = "Overview" | "Contracts" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Templates" | "Audit trail" | "Users";
 type PeriodMonths = 0 | 1 | 3 | 6 | 12; // 0 = any start date
 
 const navItems: { name: View; label: string; icon: LucideIcon; visible?: (user: User) => boolean }[] = [
@@ -20,6 +21,7 @@ const navItems: { name: View; label: string; icon: LucideIcon; visible?: (user: 
   { name: "Approvals", label: "Approvals", icon: Stamp }, { name: "Review queue", label: "Review queue", icon: ClipboardCheck },
   { name: "Obligations", label: "Obligations", icon: ListChecks }, { name: "Renewals", label: "Renewals", icon: RefreshCw },
   { name: "Vendors", label: "Vendors", icon: Building2 }, { name: "Reports", label: "Reports", icon: BarChart3 },
+  { name: "Templates", label: "Templates", icon: FileStack, visible: user => can(user, "template.manage") },
   { name: "Audit trail", label: "Audit trail", icon: History, visible: user => can(user, "audit.read") },
   { name: "Users", label: "Users & roles", icon: Users, visible: user => can(user, "user.manage") },
 ];
@@ -84,6 +86,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
   const [inbox, setInbox] = useState<InboxItem[]>([]);
   const [selected, setSelected] = useState<Contract | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [periodMonths, setPeriodMonths] = useState<PeriodMonths>(0);
@@ -141,7 +144,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
         <div className="search"><Search size={18}/><input value={search} onChange={e => setSearch(e.target.value)} onFocus={() => setView("Contracts")} aria-label="Search contracts" placeholder="Search contracts, vendors, owners…" /><kbd>⌘ K</kbd></div>
         <div className="sync-status"><ShieldCheck size={16}/> Signed in as {user.name}</div>
         <NotificationsMenu refreshKey={refreshKey} onOpenContract={id => void openContract(id)} />
-        {can(user, "contract.create") && <Button onClick={() => setUploadOpen(true)}><Upload size={16}/> Upload contract</Button>}
+        {can(user, "contract.create") && <><button className="secondary-button wf-new-button" onClick={() => setCreateOpen(true)}><FilePlus2 size={16}/> New</button><Button onClick={() => setUploadOpen(true)}><Upload size={16}/> Upload contract</Button></>}
       </header>
       <div className="content">
         {error && <div className="error-banner"><strong>Local API unavailable.</strong> {error} <button onClick={refresh}>Retry</button></div>}
@@ -154,11 +157,13 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
           {view === "Renewals" && <RenewalView contracts={renewals} onSelect={setSelected} />}
           {view === "Vendors" && <VendorsView onOpenVendor={vendor => { setFilters({ ...emptyFilters, vendor }); setSearch(""); setView("Contracts"); }} />}
           {view === "Reports" && <ReportsView />}
+          {view === "Templates" && <TemplatesView />}
           {view === "Audit trail" && <AuditView items={audit} />}
           {view === "Users" && <UsersView user={user} />}
         </>}
       </div>
     </section>
+    {createOpen && <NewContractModal onClose={() => setCreateOpen(false)} onCreated={async contract => { setCreateOpen(false); await refresh(); setSelected(contract); }} />}
     {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onComplete={async contract => { setUploadOpen(false); await refresh(); setSelected(contract); }} />}
     {selected && <ContractDrawer key={selected.id} contract={selected} user={user} allTags={allTags} onClose={() => setSelected(null)} onSaved={async contract => { setSelected(contract); await refresh(); }} onDeleted={async () => { setSelected(null); await refresh(); }} />}
   </main>;
@@ -284,7 +289,7 @@ function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }
         {tab === "Details" && <>
           {locked && <p className="wf-hint warn">Awaiting approval: terms are locked. Withdraw the request on the Approvals tab to edit them.</p>}
           {!canEdit && <p className="wf-hint">Your role has read-only access.</p>}
-          <div className="extraction-summary"><div><span>✦</span><div><strong>AI extraction</strong><p>{form.extraction_note ?? "Review each field before validation."}</p></div></div><b>{Math.round((form.extraction_confidence ?? 0) * 100)}%</b></div>
+          {form.extraction_note?.startsWith("Created") ? <div className="extraction-summary"><div><span>✎</span><div><strong>Entered by hand</strong><p>{form.extraction_note}</p></div></div></div> : <div className="extraction-summary"><div><span>✦</span><div><strong>AI extraction</strong><p>{form.extraction_note ?? "Review each field before validation."}</p></div></div><b>{Math.round((form.extraction_confidence ?? 0) * 100)}%</b></div>}
           <div className="wf-field wf-tags-field">Tags<TagEditor value={form.tags ?? []} onChange={tags => setForm({ ...form, tags })} disabled={fieldDisabled("tags")} suggestions={allTags} /></div>
           <div className="edit-grid">{editableFields.map(field => { const score = form.field_confidences?.[field.key as string]; const low = form.low_confidence_fields?.includes(field.key as string); const missing = form.missing_fields?.includes(field.key as string); const value = form[field.key]; const isLong = ["deliverables","payment_terms","notes"].includes(field.key); const disabled = fieldDisabled(field.key); return <label key={field.key} className={field.wide ? "wide" : ""}><span>{field.label}{missing ? <em className="field-flag missing">Missing</em> : low ? <em className="field-flag low">Low {score ? `${Math.round(score*100)}%` : "confidence"}</em> : score ? <em className="field-flag good">{Math.round(score*100)}%</em> : null}</span>{field.key === "status" ? <select disabled={disabled} value={String(value ?? saved.status)} onChange={e => setForm({...form,status:e.target.value})}>{contractStatuses.filter(item => statusOptions.includes(item)).map(item => <option key={item}>{item}</option>)}</select> : isLong ? <textarea disabled={disabled} value={(value as string) ?? ""} onChange={e => setForm({...form,[field.key]:e.target.value})}/> : <input disabled={disabled} type={field.type ?? "text"} value={(value as string | number) ?? ""} onChange={e => setForm({...form,[field.key]:field.type === "number" ? (e.target.value ? Number(e.target.value) : null) : e.target.value})}/>}</label>; })}</div>
           {saved.status === "Quoting" && <p className="wf-hint">To move past Quoting, validate the details and submit the contract on the Approvals tab.</p>}

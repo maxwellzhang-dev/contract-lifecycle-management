@@ -33,6 +33,7 @@ PERMISSIONS = {
     "audit.read": {"admin", "procurement", "legal", "finance"},
     "user.manage": {"admin"},
     "reminders.run": {"admin"},
+    "template.manage": {"admin", "legal"},
 }
 
 

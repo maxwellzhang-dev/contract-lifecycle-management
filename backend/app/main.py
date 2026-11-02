@@ -13,7 +13,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import connection, init_db
-from .routers import approvals, auth, comments, contracts, insights, obligations
+from .routers import approvals, auth, comments, contracts, insights, obligations, templates
 from .workflow import run_reminders
 
 log = logging.getLogger("clause")
@@ -70,5 +70,5 @@ def health():
     return {"status": "ok", "database": "sqlite", "model": os.getenv("AZURE_OPENAI_DEPLOYMENT", "not configured")}
 
 
-for module in (auth, contracts, approvals, obligations, comments, insights):
+for module in (auth, templates, contracts, approvals, obligations, comments, insights):
     app.include_router(module.router)

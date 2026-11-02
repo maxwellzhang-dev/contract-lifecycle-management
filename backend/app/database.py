@@ -234,12 +234,14 @@ def migrate(conn):
 
 
 def init_db():
-    from .auth import seed_users  # local import: auth imports this module
+    from .auth import seed_users  # local imports: these modules import this one
+    from .routers.templates import seed_templates
 
     with connection() as conn:
         conn.executescript(SCHEMA)
         migrate(conn)
         seed_users(conn)
+        seed_templates(conn)
         if conn.execute("SELECT COUNT(*) FROM contracts").fetchone()[0] == 0 and os.getenv("SEED_DEMO_DATA", "1") == "1":
             seed_contracts(conn)
 

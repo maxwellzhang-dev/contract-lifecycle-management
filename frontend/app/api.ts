@@ -8,7 +8,7 @@ export const obligationStatuses = ["Open", "Done", "Waived"] as const;
 
 export type Permission =
   | "contract.create" | "contract.edit" | "contract.delete" | "contract.validate"
-  | "approval.submit" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run";
+  | "approval.submit" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage";
 
 export type User = {
   id: number;
@@ -201,6 +201,18 @@ export type Report = {
   rows: { group: string; count: number; active: number; completed: number; value_by_currency: CurrencyValue[] }[];
 };
 
+export type Template = {
+  id: number;
+  name: string;
+  description?: string | null;
+  body: string;
+  defaults: Record<string, string>;
+  active: boolean;
+  placeholders: string[];
+  created_by?: string | null;
+  updated_at: string;
+};
+
 export type DirectoryEntry = { id: number; name: string; role: string };
 
 /** Thrown for 401 responses so the app can return to the sign-in screen. */
@@ -275,6 +287,12 @@ export const api = {
     const params = new URLSearchParams({ group_by: groupBy, date_field: dateField, ...(start ? { start } : {}), ...(end ? { end } : {}) });
     return request<Report>(`/api/reports/summary?${params}`);
   },
+
+  templates: (includeInactive = false) => request<Template[]>(`/api/templates${includeInactive ? "?include_inactive=true" : ""}`),
+  templatePlaceholders: () => request<{ placeholders: string[]; default_fields: string[] }>("/api/templates/placeholders"),
+  createTemplate: (values: Partial<Template>) => json<Template>("/api/templates", "POST", values),
+  updateTemplate: (id: number, values: Partial<Template>) => json<Template>(`/api/templates/${id}`, "PATCH", values),
+  createContract: (values: Record<string, unknown>) => json<Contract>("/api/contracts", "POST", values),
 
   notifications: () => request<{ unread: number; items: Notification[] }>("/api/notifications"),
   readNotification: (id: number) => json<{ read: boolean }>(`/api/notifications/${id}/read`, "POST"),

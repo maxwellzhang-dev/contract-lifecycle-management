@@ -36,6 +36,11 @@ New uploads always start in `Quoting`. Confirming AI-extracted metadata does not
 - **Obligations and milestones.** Deliverables, payments, milestones and compliance items with due dates, amounts and owners, per contract and across the portfolio.
 - **Notifications and reminders.** In-app notifications for approval requests and decisions, status changes, contract end dates (60/30/7 days), renewal dates and notice deadlines (30/7 days), and obligations (7 days before and when overdue). Reminders go to the user whose name matches the contract owner, renewal owner or obligation owner, or to admins and procurement when nobody matches. They run every 6 hours, and an admin can trigger a run manually with `POST /api/reminders/run`. Email is optional: set the `SMTP_*` variables in `.env`.
 - **User administration.** Admins add users, change roles, reset passwords and deactivate accounts.
+- **Comments and @mentions.** Discuss a contract in its Comments tab. Writing `@Full Name` notifies that person.
+- **Tags and advanced filters.** Up to 10 tags per contract. The contracts list filters by status, vendor, department, owner, tag, currency, total value range and end-date range, and the CSV export uses the same filters.
+- **Vendors.** One card per vendor with contract counts, value per currency, next end date and open or overdue obligations. Opening a vendor shows its contracts.
+- **Reports.** Contract counts and value per currency, grouped by department, vendor, status, owner, tag, start month or end month, with an optional date range. **Download Excel** produces a workbook with the contract list, every grouping and the obligations.
+- **Templates and manual contracts.** **New** creates a contract without an upload: either a blank record, or from a template whose `{{placeholders}}` are filled in to generate a Word document (version 1). Admins and Legal manage templates. Two templates are seeded on first start.
 - Contract dashboard with lifecycle counts, renewal monitoring, and multi-currency portfolio totals.
 - Contract directory with search, status filtering, editing, CSV export, and deletion (admins only).
 - PDF, DOCX, PNG, JPG, JPEG and WEBP uploads up to 25 MB.
@@ -48,10 +53,10 @@ New uploads always start in `Quoting`. Confirming AI-extracted metadata does not
 | Role | Can do |
 | --- | --- |
 | `admin` | Everything, including deleting contracts, managing users and running reminders. Can decide any approval step. |
-| `legal` | Upload, edit, validate, submit for approval, manage obligations, decide `legal` steps |
-| `procurement` | Upload, edit, validate, submit for approval, manage obligations, decide `procurement` steps |
+| `legal` | Upload, create, edit, validate, submit for approval, manage obligations and templates, decide `legal` steps |
+| `procurement` | Upload, create, edit, validate, submit for approval, manage obligations, decide `procurement` steps |
 | `finance` | Edit, manage obligations, decide `finance` steps |
-| `viewer` | Read only (no audit trail) |
+| `viewer` | Read only, plus comments (no audit trail) |
 
 On first start, the database is seeded with these demo accounts. They all use the password from `CLAUSE_SEED_PASSWORD` (default `ChangeMe123!`):
 
