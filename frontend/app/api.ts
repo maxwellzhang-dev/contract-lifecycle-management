@@ -53,6 +53,7 @@ export type Contract = {
   upload_date?: string | null;
   uploaded_by?: string | null;
   document_version: number;
+  tags: string[];
   pending_approval_id: number | null;
   allowed_transitions: string[];
 };

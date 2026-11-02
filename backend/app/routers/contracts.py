@@ -47,11 +47,31 @@ class ContractUpdate(BaseModel):
     renewal_notice_deadline: str | None = None
     renewal_action: str | None = None
     renewal_comments: str | None = None
+    tags: list[str] | None = None
+
+
+MAX_TAGS = 10
+MAX_TAG_LENGTH = 30
+
+
+def normalise_tags(tags: list[str] | None) -> str:
+    cleaned = []
+    for tag in tags or []:
+        tag = " ".join(str(tag).split())
+        if not tag:
+            continue
+        if len(tag) > MAX_TAG_LENGTH:
+            raise HTTPException(422, f"Tags are limited to {MAX_TAG_LENGTH} characters.")
+        if tag.lower() not in {t.lower() for t in cleaned}:
+            cleaned.append(tag)
+    if len(cleaned) > MAX_TAGS:
+        raise HTTPException(422, f"A contract can have at most {MAX_TAGS} tags.")
+    return json.dumps(sorted(cleaned, key=str.lower))
 
 
 # Fields that can still change while an approval is pending; everything else is what the
 # approvers are signing off on, so it is locked until the request is withdrawn or decided.
-EDITABLE_DURING_APPROVAL = {"notes", "renewal_comments", "status"}
+EDITABLE_DURING_APPROVAL = {"notes", "renewal_comments", "status", "tags"}
 DATE_FIELDS = {"project_start_date", "project_end_date", "renewal_date", "renewal_notice_deadline"}
 
 
@@ -134,27 +154,58 @@ def dashboard(months: int = Query(12), _: dict = Depends(current_user)):
     }
 
 
-def query_contracts(search="", status="", vendor="", department="", limit=100):
+TOTAL_VALUE = "(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0))"
+
+
+def query_contracts(search="", status="", vendor="", department="", limit=100, owner="", tag="",
+                    currency="", min_value=None, max_value=None, end_from="", end_to=""):
     clauses, params = [], []
     if search:
-        clauses.append("(title LIKE ? OR vendor_name LIKE ? OR project_name LIKE ? OR reference_number LIKE ? OR owner LIKE ?)")
-        params.extend([f"%{search}%"] * 5)
-    for field, value in (("status", status), ("vendor_name", vendor), ("department", department)):
+        clauses.append("(title LIKE ? OR vendor_name LIKE ? OR project_name LIKE ? OR reference_number LIKE ? OR owner LIKE ? OR tags LIKE ?)")
+        params.extend([f"%{search}%"] * 6)
+    for field, value in (("status", status), ("vendor_name", vendor), ("department", department),
+                         ("owner", owner), ("currency", currency)):
         if value:
             clauses.append(f"{field} = ?")
             params.append(value)
+    if tag:
+        clauses.append("EXISTS (SELECT 1 FROM json_each(contracts.tags) WHERE lower(json_each.value) = lower(?))")
+        params.append(tag)
+    if min_value is not None:
+        clauses.append(f"{TOTAL_VALUE} >= ?")
+        params.append(min_value)
+    if max_value is not None:
+        clauses.append(f"{TOTAL_VALUE} <= ?")
+        params.append(max_value)
+    if end_from:
+        clauses.append("project_end_date >= ?")
+        params.append(end_from)
+    if end_to:
+        clauses.append("project_end_date <= ?")
+        params.append(end_to)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with connection() as conn:
         rows = conn.execute(f"SELECT * FROM contracts {where} ORDER BY updated_at DESC LIMIT ?", (*params, limit)).fetchall()
         return with_workflow(conn, rows)
 
 
+class ContractFilters:
+    """Query parameters shared by the list and export endpoints."""
+
+    def __init__(
+        self, search: str = "", status: str = "", vendor: str = "", department: str = "", owner: str = "",
+        tag: str = "", currency: str = "", min_value: float | None = None, max_value: float | None = None,
+        end_from: str = "", end_to: str = "",
+    ):
+        self.values = dict(search=search, status=status, vendor=vendor, department=department, owner=owner, tag=tag,
+                           currency=currency, min_value=min_value, max_value=max_value, end_from=end_from, end_to=end_to)
+
+
 @router.get("/contracts")
 def list_contracts(
-    search: str = "", status: str = "", vendor: str = "", department: str = "",
-    limit: int = Query(100, ge=1, le=500), _: dict = Depends(current_user),
+    filters: ContractFilters = Depends(), limit: int = Query(100, ge=1, le=1000), _: dict = Depends(current_user),
 ):
-    return query_contracts(search, status, vendor, department, limit)
+    return query_contracts(limit=limit, **filters.values)
 
 
 @router.get("/contracts/{contract_id}")
@@ -274,6 +325,8 @@ def update_contract(contract_id: int, update: ContractUpdate, user: dict = Depen
         key: (value.strip() or None) if isinstance(value, str) else value
         for key, value in update.model_dump(exclude_unset=True).items()
     }
+    if "tags" in changes:
+        changes["tags"] = normalise_tags(changes["tags"])
     with connection() as conn:
         old = load_contract(conn, contract_id)
         # Ignore fields the client re-sent unchanged so a full-form save is not a status change.
@@ -451,10 +504,12 @@ def csv_safe(value):
 
 
 @router.get("/export/contracts.csv")
-def export_contracts(search: str = "", status: str = "", _: dict = Depends(current_user)):
-    contracts = query_contracts(search=search, status=status, limit=500)
+def export_contracts(filters: ContractFilters = Depends(), _: dict = Depends(current_user)):
+    contracts = query_contracts(limit=5000, **filters.values)
     stream = io.StringIO()
-    fields = ["reference_number", "title", "vendor_name", "project_name", "status", "owner", "department", "project_start_date", "project_end_date", "renewal_date", "currency", "one_time_amount", "validation_status"]
+    fields = ["reference_number", "title", "vendor_name", "project_name", "status", "owner", "department", "project_start_date", "project_end_date", "renewal_date", "currency", "one_time_amount", "optional_amount", "validation_status", "tags"]
+    for item in contracts:
+        item["tags"] = ", ".join(item.get("tags") or [])
     writer = csv.DictWriter(stream, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
     writer.writerows({key: csv_safe(item.get(key)) for key in fields} for item in contracts)

@@ -1,13 +1,14 @@
 "use client";
 
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
+import { CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table } from "@/components/ui/table";
-import { API_BASE, AuthError, api, can, contractStatuses, fileUrl, previewUrl, type AuditItem, type Contract, type Dashboard, type InboxItem, type User } from "./api";
+import { AuthError, api, can, contractStatuses, fileUrl, previewUrl, type AuditItem, type Contract, type Dashboard, type InboxItem, type User } from "./api";
 import { ApprovalsPanel, CommentsPanel, HistoryPanel, ObligationsPanel, VersionsPanel } from "./contract-panels";
 import { AuditDetails, EmptyState, SectionHeader, Status, dateLabel, errorText } from "./shared";
+import { AdvancedFilters, TagEditor, Tags, activeFilterCount, emptyFilters, exportUrl, filterContracts, type Filters } from "./filters";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
 type View = "Overview" | "Contracts" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Audit trail" | "Users";
@@ -45,7 +46,7 @@ function ContractTable({ contracts, onSelect }: { contracts: Contract[]; onSelec
   const showOwner = contracts.some(contract => contract.owner);
   return <div className="table-wrap"><Table><thead><tr><th>Vendor & project</th>{showOwner && <th>Owner</th>}<th>Contract value</th><th>Status</th><th>Expiry date</th><th>Validation</th><th /></tr></thead><tbody>
     {contracts.map((contract) => { const days = daysLeft(contract.project_end_date); const level = urgency(days); return <tr key={contract.id} onClick={() => onSelect(contract)} className={`click-row ${level}`}>
-      <td><div className="vendor-cell"><span className={`vendor-logo hue-${vendorHue(contract.vendor_name)}`}>{(contract.vendor_name ?? "?").slice(0, 1)}</span><div><strong>{contract.vendor_name ?? "Vendor not identified"}</strong><small>{contract.project_name ?? contract.title}</small></div></div></td>
+      <td><div className="vendor-cell"><span className={`vendor-logo hue-${vendorHue(contract.vendor_name)}`}>{(contract.vendor_name ?? "?").slice(0, 1)}</span><div><strong>{contract.vendor_name ?? "Vendor not identified"}</strong><small>{contract.project_name ?? contract.title}</small><Tags tags={contract.tags} /></div></div></td>
       {showOwner && <td>{contract.owner ?? "Unassigned"}</td>}<td className="nowrap"><strong>{money(contract)}</strong></td><td><Status value={contract.status} plain /></td><td className="nowrap">{dateLabel(contract.project_end_date)}{level && days !== null && <em className="due-in">{days < 0 ? `${-days}d overdue` : days === 0 ? "Today" : `in ${days}d`}</em>}</td><td><Status value={contract.validation_status} /></td><td><button className="row-menu" aria-label="Open contract">›</button></td>
     </tr>; })}
     {!contracts.length && <tr><td colSpan={showOwner ? 7 : 6} className="empty-cell">No contracts match these filters.</td></tr>}
@@ -69,7 +70,7 @@ type Loaded = { dashboard: Dashboard; contracts: Contract[]; audit: AuditItem[];
 
 function loadAll(user: User, months: PeriodMonths): Promise<Loaded> {
   return Promise.all([
-    api.dashboard(months), api.contracts(), can(user, "audit.read") ? api.audit() : Promise.resolve([]), api.inbox(),
+    api.dashboard(months), api.contracts("?limit=1000"), can(user, "audit.read") ? api.audit() : Promise.resolve([]), api.inbox(),
   ]).then(([dashboard, contracts, audit, inbox]) => ({ dashboard, contracts, audit, inbox }));
 }
 
@@ -82,7 +83,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
   const [selected, setSelected] = useState<Contract | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  const [filters, setFilters] = useState<Filters>(emptyFilters);
   const [periodMonths, setPeriodMonths] = useState<PeriodMonths>(12);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -114,10 +115,8 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
 
   const reviewQueue = useMemo(() => contracts.filter(c => c.validation_status !== "Validated"), [contracts]);
   const renewals = useMemo(() => contracts.filter(c => c.project_end_date && !["Completed", "Cancelled"].includes(c.status)).sort((a, b) => (a.project_end_date ?? "").localeCompare(b.project_end_date ?? "")), [contracts]);
-  const filtered = useMemo(() => contracts.filter(c => {
-    const text = `${c.vendor_name} ${c.project_name} ${c.title} ${c.reference_number} ${c.owner}`.toLowerCase();
-    return (!search || text.includes(search.toLowerCase())) && (!statusFilter || c.status === statusFilter);
-  }), [contracts, search, statusFilter]);
+  const filtered = useMemo(() => filterContracts(contracts, search, filters), [contracts, search, filters]);
+  const allTags = useMemo(() => [...new Set(contracts.flatMap(c => c.tags ?? []))].sort(), [contracts]);
   const visibleNav = navItems.filter(item => !item.visible || item.visible(user));
 
   function navigate(next: View) { setView(next); setSelected(null); }
@@ -146,7 +145,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
         {error && <div className="error-banner"><strong>Local API unavailable.</strong> {error} <button onClick={refresh}>Retry</button></div>}
         {loading ? <div className="loading-state"><span /><p>Loading your contract portfolio…</p></div> : <>
           {view === "Overview" && <Overview dashboard={dashboard} contracts={contracts} inbox={inbox} onSelect={setSelected} onNavigate={navigate} />}
-          {view === "Contracts" && <ContractsView contracts={filtered} status={statusFilter} setStatus={setStatusFilter} search={search} setSearch={setSearch} periodMonths={periodMonths} setPeriodMonths={setPeriodMonths} onSelect={setSelected} />}
+          {view === "Contracts" && <ContractsView contracts={filtered} allContracts={contracts} filters={filters} setFilters={setFilters} search={search} setSearch={setSearch} periodMonths={periodMonths} setPeriodMonths={setPeriodMonths} onSelect={setSelected} />}
           {view === "Approvals" && <ApprovalsView items={inbox} onOpen={id => void openContract(id)} />}
           {view === "Review queue" && <ReviewView contracts={reviewQueue} onSelect={setSelected} />}
           {view === "Obligations" && <ObligationsView key={refreshKey} user={user} onOpen={id => void openContract(id)} />}
@@ -157,7 +156,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
       </div>
     </section>
     {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onComplete={async contract => { setUploadOpen(false); await refresh(); setSelected(contract); }} />}
-    {selected && <ContractDrawer key={selected.id} contract={selected} user={user} onClose={() => setSelected(null)} onSaved={async contract => { setSelected(contract); await refresh(); }} onDeleted={async () => { setSelected(null); await refresh(); }} />}
+    {selected && <ContractDrawer key={selected.id} contract={selected} user={user} allTags={allTags} onClose={() => setSelected(null)} onSaved={async contract => { setSelected(contract); await refresh(); }} onDeleted={async () => { setSelected(null); await refresh(); }} />}
   </main>;
 }
 
@@ -216,11 +215,20 @@ function urgency(days: number | null) {
 }
 
 
-function ContractsView({ contracts, status, setStatus, search, setSearch, periodMonths, setPeriodMonths, onSelect }: { contracts: Contract[]; status: string; setStatus: (v: string) => void; search: string; setSearch: (v: string) => void; periodMonths: PeriodMonths; setPeriodMonths: (months: PeriodMonths) => void; onSelect: (c: Contract) => void }) {
+function ContractsView({ contracts, allContracts, filters, setFilters, search, setSearch, periodMonths, setPeriodMonths, onSelect }: { contracts: Contract[]; allContracts: Contract[]; filters: Filters; setFilters: (f: Filters) => void; search: string; setSearch: (v: string) => void; periodMonths: PeriodMonths; setPeriodMonths: (months: PeriodMonths) => void; onSelect: (c: Contract) => void }) {
   const [now] = useState(() => Date.now());
+  const [showFilters, setShowFilters] = useState(() => activeFilterCount(filters) > 0);
   const start = new Date(now - ({ 1: 31, 3: 92, 6: 183, 12: 366 }[periodMonths] * 86400000));
   const scoped = contracts.filter(contract => { const value = contract.project_start_date ?? contract.upload_date; return value ? new Date(value) >= start : false; });
-  return <><SectionHeader eyebrow="CONTRACT MANAGEMENT" title="Contracts" copy="Search and organize your contracts by status and start date."/><div className="filter-bar"><label><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, project, owner…" /></label><select value={periodMonths} onChange={e => setPeriodMonths(Number(e.target.value) as PeriodMonths)} aria-label="Contract start date"><option value={1}>Started in last month</option><option value={3}>Started in last quarter</option><option value={6}>Started in last 6 months</option><option value={12}>Started in last year</option></select><select value={status} onChange={e => setStatus(e.target.value)}><option value="">All statuses</option>{contractStatuses.map(item => <option key={item}>{item}</option>)}</select><a className="export-button" href={`${API_BASE}/api/export/contracts.csv?search=${encodeURIComponent(search)}&status=${encodeURIComponent(status)}`}>↓ Export CSV</a></div><section className="panel contracts-panel catalog"><div className="panel-title"><div><h2>{scoped.length} contracts</h2><p>Click any row to inspect and edit extracted fields.</p></div></div><ContractTable contracts={scoped} onSelect={onSelect}/></section></>;
+  const count = activeFilterCount(filters);
+  return <><SectionHeader eyebrow="CONTRACT MANAGEMENT" title="Contracts" copy="Search, filter and organize your contracts."/>
+    <div className="filter-bar"><label><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, project, owner, tag…" /></label>
+      <select value={periodMonths} onChange={e => setPeriodMonths(Number(e.target.value) as PeriodMonths)} aria-label="Contract start date"><option value={1}>Started in last month</option><option value={3}>Started in last quarter</option><option value={6}>Started in last 6 months</option><option value={12}>Started in last year</option></select>
+      <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })} aria-label="Status"><option value="">All statuses</option>{contractStatuses.map(item => <option key={item}>{item}</option>)}</select>
+      <button type="button" className={`secondary-button wf-filter-toggle${count ? " on" : ""}`} aria-expanded={showFilters} onClick={() => setShowFilters(!showFilters)}><SlidersHorizontal size={16}/> Filters{count ? ` (${count})` : ""}</button>
+      <a className="export-button" href={exportUrl(search, filters)}>↓ Export CSV</a></div>
+    {showFilters && <AdvancedFilters contracts={allContracts} filters={filters} setFilters={setFilters} />}
+    <section className="panel contracts-panel catalog"><div className="panel-title"><div><h2>{scoped.length} contract{scoped.length === 1 ? "" : "s"}</h2><p>Click any row to inspect and edit extracted fields.</p></div></div><ContractTable contracts={scoped} onSelect={onSelect}/></section></>;
 }
 
 function ReviewView({ contracts, onSelect }: { contracts: Contract[]; onSelect: (c: Contract) => void }) {
@@ -250,14 +258,14 @@ const editableFields: { key: keyof Contract; label: string; type?: string; wide?
 type DrawerTab = "Details" | "Approvals" | "Comments" | "Versions" | "Obligations" | "History";
 const drawerTabs: DrawerTab[] = ["Details", "Approvals", "Comments", "Versions", "Obligations", "History"];
 
-function ContractDrawer({ contract, user, onClose, onSaved, onDeleted }: { contract: Contract; user: User; onClose: () => void; onSaved: (c: Contract) => Promise<void>; onDeleted: () => Promise<void> }) {
+function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }: { contract: Contract; user: User; allTags: string[]; onClose: () => void; onSaved: (c: Contract) => Promise<void>; onDeleted: () => Promise<void> }) {
   const [form, setForm] = useState<Contract>(contract); const [saved, setSaved] = useState<Contract>(contract); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
   const [tab, setTab] = useState<DrawerTab>(contract.pending_approval_id ? "Approvals" : "Details");
   const fileExtension = saved.file_name?.split(".").pop()?.toLowerCase();
   const canEdit = can(user, "contract.edit");
   const locked = !!saved.pending_approval_id;
   // While an approval is pending only notes (and status, for hold/cancel) can change.
-  const fieldDisabled = (key: keyof Contract) => !canEdit || (locked && !["notes", "status"].includes(key as string));
+  const fieldDisabled = (key: keyof Contract) => !canEdit || (locked && !["notes", "status", "tags"].includes(key as string));
   const statusOptions = [saved.status, ...saved.allowed_transitions];
 
   async function changed(next: Contract) { setForm(next); setSaved(next); await onSaved(next); }
@@ -273,6 +281,7 @@ function ContractDrawer({ contract, user, onClose, onSaved, onDeleted }: { contr
           {locked && <p className="wf-hint warn">Awaiting approval: terms are locked. Withdraw the request on the Approvals tab to edit them.</p>}
           {!canEdit && <p className="wf-hint">Your role has read-only access.</p>}
           <div className="extraction-summary"><div><span>✦</span><div><strong>AI extraction</strong><p>{form.extraction_note ?? "Review each field before validation."}</p></div></div><b>{Math.round((form.extraction_confidence ?? 0) * 100)}%</b></div>
+          <div className="wf-field wf-tags-field">Tags<TagEditor value={form.tags ?? []} onChange={tags => setForm({ ...form, tags })} disabled={fieldDisabled("tags")} suggestions={allTags} /></div>
           <div className="edit-grid">{editableFields.map(field => { const score = form.field_confidences?.[field.key as string]; const low = form.low_confidence_fields?.includes(field.key as string); const missing = form.missing_fields?.includes(field.key as string); const value = form[field.key]; const isLong = ["deliverables","payment_terms","notes"].includes(field.key); const disabled = fieldDisabled(field.key); return <label key={field.key} className={field.wide ? "wide" : ""}><span>{field.label}{missing ? <em className="field-flag missing">Missing</em> : low ? <em className="field-flag low">Low {score ? `${Math.round(score*100)}%` : "confidence"}</em> : score ? <em className="field-flag good">{Math.round(score*100)}%</em> : null}</span>{field.key === "status" ? <select disabled={disabled} value={String(value ?? saved.status)} onChange={e => setForm({...form,status:e.target.value})}>{contractStatuses.filter(item => statusOptions.includes(item)).map(item => <option key={item}>{item}</option>)}</select> : isLong ? <textarea disabled={disabled} value={(value as string) ?? ""} onChange={e => setForm({...form,[field.key]:e.target.value})}/> : <input disabled={disabled} type={field.type ?? "text"} value={(value as string | number) ?? ""} onChange={e => setForm({...form,[field.key]:field.type === "number" ? (e.target.value ? Number(e.target.value) : null) : e.target.value})}/>}</label>; })}</div>
           {saved.status === "Quoting" && <p className="wf-hint">To move past Quoting, validate the details and submit the contract on the Approvals tab.</p>}
         </>}
