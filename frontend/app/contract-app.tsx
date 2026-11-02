@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Building2, CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table } from "@/components/ui/table";
@@ -9,15 +9,17 @@ import { AuthError, api, can, contractStatuses, fileUrl, previewUrl, type AuditI
 import { ApprovalsPanel, CommentsPanel, HistoryPanel, ObligationsPanel, VersionsPanel } from "./contract-panels";
 import { AuditDetails, EmptyState, SectionHeader, Status, dateLabel, errorText } from "./shared";
 import { AdvancedFilters, TagEditor, Tags, activeFilterCount, emptyFilters, exportUrl, filterContracts, type Filters } from "./filters";
+import { ReportsView, VendorsView } from "./insights";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
-type View = "Overview" | "Contracts" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Audit trail" | "Users";
-type PeriodMonths = 1 | 3 | 6 | 12;
+type View = "Overview" | "Contracts" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Audit trail" | "Users";
+type PeriodMonths = 0 | 1 | 3 | 6 | 12; // 0 = any start date
 
 const navItems: { name: View; label: string; icon: LucideIcon; visible?: (user: User) => boolean }[] = [
   { name: "Overview", label: "Overview", icon: LayoutDashboard }, { name: "Contracts", label: "Contract management", icon: FileText },
   { name: "Approvals", label: "Approvals", icon: Stamp }, { name: "Review queue", label: "Review queue", icon: ClipboardCheck },
   { name: "Obligations", label: "Obligations", icon: ListChecks }, { name: "Renewals", label: "Renewals", icon: RefreshCw },
+  { name: "Vendors", label: "Vendors", icon: Building2 }, { name: "Reports", label: "Reports", icon: BarChart3 },
   { name: "Audit trail", label: "Audit trail", icon: History, visible: user => can(user, "audit.read") },
   { name: "Users", label: "Users & roles", icon: Users, visible: user => can(user, "user.manage") },
 ];
@@ -70,7 +72,7 @@ type Loaded = { dashboard: Dashboard; contracts: Contract[]; audit: AuditItem[];
 
 function loadAll(user: User, months: PeriodMonths): Promise<Loaded> {
   return Promise.all([
-    api.dashboard(months), api.contracts("?limit=1000"), can(user, "audit.read") ? api.audit() : Promise.resolve([]), api.inbox(),
+    api.dashboard(months || 12), api.contracts("?limit=1000"), can(user, "audit.read") ? api.audit() : Promise.resolve([]), api.inbox(),
   ]).then(([dashboard, contracts, audit, inbox]) => ({ dashboard, contracts, audit, inbox }));
 }
 
@@ -84,7 +86,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filters, setFilters] = useState<Filters>(emptyFilters);
-  const [periodMonths, setPeriodMonths] = useState<PeriodMonths>(12);
+  const [periodMonths, setPeriodMonths] = useState<PeriodMonths>(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -150,6 +152,8 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
           {view === "Review queue" && <ReviewView contracts={reviewQueue} onSelect={setSelected} />}
           {view === "Obligations" && <ObligationsView key={refreshKey} user={user} onOpen={id => void openContract(id)} />}
           {view === "Renewals" && <RenewalView contracts={renewals} onSelect={setSelected} />}
+          {view === "Vendors" && <VendorsView onOpenVendor={vendor => { setFilters({ ...emptyFilters, vendor }); setSearch(""); setView("Contracts"); }} />}
+          {view === "Reports" && <ReportsView />}
           {view === "Audit trail" && <AuditView items={audit} />}
           {view === "Users" && <UsersView user={user} />}
         </>}
@@ -218,12 +222,12 @@ function urgency(days: number | null) {
 function ContractsView({ contracts, allContracts, filters, setFilters, search, setSearch, periodMonths, setPeriodMonths, onSelect }: { contracts: Contract[]; allContracts: Contract[]; filters: Filters; setFilters: (f: Filters) => void; search: string; setSearch: (v: string) => void; periodMonths: PeriodMonths; setPeriodMonths: (months: PeriodMonths) => void; onSelect: (c: Contract) => void }) {
   const [now] = useState(() => Date.now());
   const [showFilters, setShowFilters] = useState(() => activeFilterCount(filters) > 0);
-  const start = new Date(now - ({ 1: 31, 3: 92, 6: 183, 12: 366 }[periodMonths] * 86400000));
-  const scoped = contracts.filter(contract => { const value = contract.project_start_date ?? contract.upload_date; return value ? new Date(value) >= start : false; });
+  const start = periodMonths ? new Date(now - ({ 1: 31, 3: 92, 6: 183, 12: 366 }[periodMonths] * 86400000)) : null;
+  const scoped = start ? contracts.filter(contract => { const value = contract.project_start_date ?? contract.upload_date; return value ? new Date(value) >= start : false; }) : contracts;
   const count = activeFilterCount(filters);
   return <><SectionHeader eyebrow="CONTRACT MANAGEMENT" title="Contracts" copy="Search, filter and organize your contracts."/>
     <div className="filter-bar"><label><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, project, owner, tag…" /></label>
-      <select value={periodMonths} onChange={e => setPeriodMonths(Number(e.target.value) as PeriodMonths)} aria-label="Contract start date"><option value={1}>Started in last month</option><option value={3}>Started in last quarter</option><option value={6}>Started in last 6 months</option><option value={12}>Started in last year</option></select>
+      <select value={periodMonths} onChange={e => setPeriodMonths(Number(e.target.value) as PeriodMonths)} aria-label="Contract start date"><option value={0}>Any start date</option><option value={1}>Started in last month</option><option value={3}>Started in last quarter</option><option value={6}>Started in last 6 months</option><option value={12}>Started in last year</option></select>
       <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })} aria-label="Status"><option value="">All statuses</option>{contractStatuses.map(item => <option key={item}>{item}</option>)}</select>
       <button type="button" className={`secondary-button wf-filter-toggle${count ? " on" : ""}`} aria-expanded={showFilters} onClick={() => setShowFilters(!showFilters)}><SlidersHorizontal size={16}/> Filters{count ? ` (${count})` : ""}</button>
       <a className="export-button" href={exportUrl(search, filters)}>↓ Export CSV</a></div>

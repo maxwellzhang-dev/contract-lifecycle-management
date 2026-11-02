@@ -7,3 +7,4 @@ pymupdf>=1.26,<2
 python-docx>=1.2,<2
 Pillow>=11,<13
 
+openpyxl>=3.1,<4

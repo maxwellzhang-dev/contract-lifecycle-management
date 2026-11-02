@@ -568,3 +568,25 @@ nav .nav-item:nth-child(8) { --sec: var(--hue-rose);   --sec-bg: var(--hue-rose-
 .wf-tags-field{margin-bottom:14px}
 .wf-tag-editor{display:flex;flex-wrap:wrap;gap:6px;align-items:center;border:1px solid #dfe2ea;border-radius:8px;padding:6px 8px;min-height:42px;background:#fff}
 .wf-tag-editor input{border:0!important;outline:0;padding:4px!important;flex:1;min-width:120px;font:inherit;font-weight:400;box-shadow:none!important}
+nav .nav-item:nth-child(9)  { --sec: var(--hue-violet); --sec-bg: var(--hue-violet-bg); }
+nav .nav-item:nth-child(10) { --sec: var(--hue-rose);   --sec-bg: var(--hue-rose-bg); }
+.wf-muted{color:var(--muted)}
+.wf-values{display:flex;flex-wrap:wrap;gap:4px 12px;font-weight:700;color:#1f2937}
+.wf-vendor-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.wf-vendor{text-align:left;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;display:flex;flex-direction:column;gap:12px;cursor:pointer;font:inherit;color:inherit}
+.wf-vendor:hover:not(:disabled){border-color:#c9c4ff;box-shadow:0 4px 16px -8px rgba(80,70,229,.35)}
+.wf-vendor:disabled{cursor:default;opacity:.8}
+.wf-vendor header strong{display:block;font-size:17px}
+.wf-vendor header small{color:var(--muted);font-size:13px}
+.wf-vendor dl{margin:0;display:grid;gap:6px}
+.wf-vendor dl div{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+.wf-vendor dt{color:var(--muted)}
+.wf-vendor dd{margin:0;font-weight:700;text-align:right}
+.wf-vendor dd.warn{color:#be123c}
+.wf-vendor footer{display:flex;flex-wrap:wrap;gap:6px}
+.wf-vendor footer .wf-chip{border-style:solid;cursor:default}
+.wf-download{display:inline-flex;align-items:center;gap:6px;justify-content:center;text-decoration:none;align-self:end}
+.wf-report{width:100%;border-collapse:collapse;font-size:14px}
+.wf-report th,.wf-report td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap}
+.wf-report th{color:var(--muted);font-weight:700;font-size:13px}
+.wf-report .num{text-align:right;font-variant-numeric:tabular-nums}

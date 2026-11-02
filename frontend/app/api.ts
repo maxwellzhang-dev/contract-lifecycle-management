@@ -179,6 +179,28 @@ export type Comment = {
   created_at: string;
 };
 
+export type CurrencyValue = { currency: string; value: number };
+
+export type VendorSummary = {
+  vendor_name: string;
+  contract_count: number;
+  active_count: number;
+  statuses: Record<string, number>;
+  value_by_currency: CurrencyValue[];
+  departments: string[];
+  next_end_date: string | null;
+  open_obligations: number;
+  overdue_obligations: number;
+  last_updated: string;
+};
+
+export type Report = {
+  group_by: string;
+  contract_count: number;
+  value_by_currency: CurrencyValue[];
+  rows: { group: string; count: number; active: number; completed: number; value_by_currency: CurrencyValue[] }[];
+};
+
 export type DirectoryEntry = { id: number; name: string; role: string };
 
 /** Thrown for 401 responses so the app can return to the sign-in screen. */
@@ -247,6 +269,12 @@ export const api = {
   comments: (contractId: number) => request<Comment[]>(`/api/contracts/${contractId}/comments`),
   addComment: (contractId: number, body: string) => json<Comment>(`/api/contracts/${contractId}/comments`, "POST", { body }),
   deleteComment: (id: number) => json<{ deleted: boolean }>(`/api/comments/${id}`, "DELETE"),
+
+  vendors: () => request<VendorSummary[]>("/api/vendors"),
+  report: (groupBy: string, dateField: string, start: string, end: string) => {
+    const params = new URLSearchParams({ group_by: groupBy, date_field: dateField, ...(start ? { start } : {}), ...(end ? { end } : {}) });
+    return request<Report>(`/api/reports/summary?${params}`);
+  },
 
   notifications: () => request<{ unread: number; items: Notification[] }>("/api/notifications"),
   readNotification: (id: number) => json<{ read: boolean }>(`/api/notifications/${id}/read`, "POST"),
