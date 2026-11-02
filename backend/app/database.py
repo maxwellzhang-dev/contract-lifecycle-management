@@ -210,6 +210,26 @@ CREATE TABLE IF NOT EXISTS contract_templates (
 );
 CREATE INDEX IF NOT EXISTS idx_notification_user ON notifications(user_id, read_at);
 CREATE INDEX IF NOT EXISTS idx_comment_contract ON contract_comments(contract_id);
+CREATE TABLE IF NOT EXISTS ai_reviews (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    document_version INTEGER NOT NULL,
+    result TEXT NOT NULL,
+    model TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS ai_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    document_version INTEGER,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_review_contract ON ai_reviews(contract_id);
+CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id);
 """
 
 # Columns added after the first prototype release; older databases get them via ALTER TABLE.

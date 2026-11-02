@@ -48,6 +48,24 @@ New uploads always start in `Quoting`. Confirming AI-extracted metadata does not
 - Human review, validation, and a per-contract and global audit trail.
 - Side-by-side document review: PDFs are embedded directly, and DOCX files are rendered locally as read-only previews of paragraphs and tables.
 
+## AI assistant
+
+These features use the same Azure OpenAI deployment as extraction (`AZURE_OPENAI_*` in `.env`). They are hidden from viewers, and they show a clear message when the deployment is not configured.
+
+| Feature | Where | What it does |
+| --- | --- | --- |
+| AI review | Contract → **AI assistant** | Summary, key terms, risky clauses (high/medium/low, with the quoted clause and a suggestion), possibly missing clauses, and places where the record disagrees with the document. One click copies the document's value into the record, or adds a suggested obligation. The latest review is saved and marked out of date when a new document version is uploaded. |
+| Ask about this contract | Contract → **AI assistant** | Answers questions from the document and record only, with quotes, and says when the answer is not in the contract. Questions and answers are kept as history. |
+| Compare versions | Contract → **AI assistant** (2+ versions) | Lists material changes between two document versions and whether each is favourable to us. |
+| AI search | Contracts page | Turns a plain-language request into the normal filters, using only vendors, departments, owners, tags and currencies that exist. |
+
+Notes:
+
+- During these calls, the contract text and metadata are sent to the Azure OpenAI resource with `store: false`. This is the same resource that extraction already uses.
+- Prompts treat contract text as data. Instructions written inside a document are ignored.
+- Model output can be wrong. Quotes are shown so reviewers can check them, and nothing changes a contract until a person clicks.
+- Every AI review and comparison is recorded in the audit trail.
+
 ## Roles
 
 | Role | Can do |
@@ -56,7 +74,7 @@ New uploads always start in `Quoting`. Confirming AI-extracted metadata does not
 | `legal` | Upload, create, edit, validate, submit for approval, manage obligations and templates, decide `legal` steps |
 | `procurement` | Upload, create, edit, validate, submit for approval, manage obligations, decide `procurement` steps |
 | `finance` | Edit, manage obligations, decide `finance` steps |
-| `viewer` | Read only, plus comments (no audit trail) |
+| `viewer` | Read only, plus comments; can read saved AI reviews but not run AI features (no audit trail) |
 
 On first start, the database is seeded with these demo accounts. They all use the password from `CLAUSE_SEED_PASSWORD` (default `ChangeMe123!`):
 

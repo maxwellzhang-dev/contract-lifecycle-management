@@ -10,6 +10,7 @@ import { ApprovalsPanel, CommentsPanel, HistoryPanel, ObligationsPanel, Versions
 import { AuditDetails, EmptyState, SectionHeader, Status, dateLabel, errorText } from "./shared";
 import { AdvancedFilters, TagEditor, Tags, activeFilterCount, emptyFilters, exportUrl, filterContracts, type Filters } from "./filters";
 import { ReportsView, VendorsView } from "./insights";
+import { AiPanel, AiSearch } from "./ai-panel";
 import { NewContractModal, TemplatesView } from "./templates";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
@@ -150,7 +151,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
         {error && <div className="error-banner"><strong>Local API unavailable.</strong> {error} <button onClick={refresh}>Retry</button></div>}
         {loading ? <div className="loading-state"><span /><p>Loading your contract portfolio…</p></div> : <>
           {view === "Overview" && <Overview dashboard={dashboard} contracts={contracts} inbox={inbox} onSelect={setSelected} onNavigate={navigate} />}
-          {view === "Contracts" && <ContractsView contracts={filtered} allContracts={contracts} filters={filters} setFilters={setFilters} search={search} setSearch={setSearch} periodMonths={periodMonths} setPeriodMonths={setPeriodMonths} onSelect={setSelected} />}
+          {view === "Contracts" && <ContractsView user={user} contracts={filtered} allContracts={contracts} filters={filters} setFilters={setFilters} search={search} setSearch={setSearch} periodMonths={periodMonths} setPeriodMonths={setPeriodMonths} onSelect={setSelected} />}
           {view === "Approvals" && <ApprovalsView items={inbox} onOpen={id => void openContract(id)} />}
           {view === "Review queue" && <ReviewView contracts={reviewQueue} onSelect={setSelected} />}
           {view === "Obligations" && <ObligationsView key={refreshKey} user={user} onOpen={id => void openContract(id)} />}
@@ -224,13 +225,16 @@ function urgency(days: number | null) {
 }
 
 
-function ContractsView({ contracts, allContracts, filters, setFilters, search, setSearch, periodMonths, setPeriodMonths, onSelect }: { contracts: Contract[]; allContracts: Contract[]; filters: Filters; setFilters: (f: Filters) => void; search: string; setSearch: (v: string) => void; periodMonths: PeriodMonths; setPeriodMonths: (months: PeriodMonths) => void; onSelect: (c: Contract) => void }) {
+function ContractsView({ user, contracts, allContracts, filters, setFilters, search, setSearch, periodMonths, setPeriodMonths, onSelect }: { user: User; contracts: Contract[]; allContracts: Contract[]; filters: Filters; setFilters: (f: Filters) => void; search: string; setSearch: (v: string) => void; periodMonths: PeriodMonths; setPeriodMonths: (months: PeriodMonths) => void; onSelect: (c: Contract) => void }) {
   const [now] = useState(() => Date.now());
   const [showFilters, setShowFilters] = useState(() => activeFilterCount(filters) > 0);
+  const [aiNote, setAiNote] = useState("");
   const start = periodMonths ? new Date(now - ({ 1: 31, 3: 92, 6: 183, 12: 366 }[periodMonths] * 86400000)) : null;
   const scoped = start ? contracts.filter(contract => { const value = contract.project_start_date ?? contract.upload_date; return value ? new Date(value) >= start : false; }) : contracts;
   const count = activeFilterCount(filters);
   return <><SectionHeader eyebrow="CONTRACT MANAGEMENT" title="Contracts" copy="Search, filter and organize your contracts."/>
+    {can(user, "ai.use") && <AiSearch onApply={(next, text, explanation) => { setFilters(next); setSearch(text); setShowFilters(true); setAiNote(explanation); }} />}
+    {aiNote && <p className="wf-hint ai-note"><b>AI:</b> {aiNote} <button className="wf-link" onClick={() => { setFilters(emptyFilters); setSearch(""); setAiNote(""); }}>Clear</button></p>}
     <div className="filter-bar"><label><Search size={17}/><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search vendor, project, owner, tag…" /></label>
       <select value={periodMonths} onChange={e => setPeriodMonths(Number(e.target.value) as PeriodMonths)} aria-label="Contract start date"><option value={0}>Any start date</option><option value={1}>Started in last month</option><option value={3}>Started in last quarter</option><option value={6}>Started in last 6 months</option><option value={12}>Started in last year</option></select>
       <select value={filters.status} onChange={e => setFilters({ ...filters, status: e.target.value })} aria-label="Status"><option value="">All statuses</option>{contractStatuses.map(item => <option key={item}>{item}</option>)}</select>
@@ -264,8 +268,8 @@ const editableFields: { key: keyof Contract; label: string; type?: string; wide?
   {key:"title",label:"Contract title",wide:true},{key:"reference_number",label:"Reference number"},{key:"vendor_name",label:"Vendor name"},{key:"project_name",label:"Project / scope",wide:true},{key:"phase",label:"Phase"},{key:"status",label:"Contract status"},{key:"project_start_date",label:"Start date",type:"date"},{key:"project_end_date",label:"End date",type:"date"},{key:"renewal_date",label:"Renewal date",type:"date"},{key:"currency",label:"Currency"},{key:"one_time_amount",label:"One-time amount",type:"number"},{key:"optional_amount",label:"Optional amount",type:"number"},{key:"vendor_contact",label:"Vendor contact"},{key:"internal_contact",label:"Internal contact"},{key:"department",label:"Department"},{key:"owner",label:"Contract owner"},{key:"deliverables",label:"Deliverables / services",wide:true},{key:"payment_terms",label:"Payment terms",wide:true},{key:"notes",label:"Notes",wide:true},
 ];
 
-type DrawerTab = "Details" | "Approvals" | "Comments" | "Versions" | "Obligations" | "History";
-const drawerTabs: DrawerTab[] = ["Details", "Approvals", "Comments", "Versions", "Obligations", "History"];
+type DrawerTab = "Details" | "AI assistant" | "Approvals" | "Comments" | "Versions" | "Obligations" | "History";
+const drawerTabs: DrawerTab[] = ["Details", "AI assistant", "Approvals", "Comments", "Versions", "Obligations", "History"];
 
 function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }: { contract: Contract; user: User; allTags: string[]; onClose: () => void; onSaved: (c: Contract) => Promise<void>; onDeleted: () => Promise<void> }) {
   const [form, setForm] = useState<Contract>(contract); const [saved, setSaved] = useState<Contract>(contract); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
@@ -294,6 +298,7 @@ function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }
           <div className="edit-grid">{editableFields.map(field => { const score = form.field_confidences?.[field.key as string]; const low = form.low_confidence_fields?.includes(field.key as string); const missing = form.missing_fields?.includes(field.key as string); const value = form[field.key]; const isLong = ["deliverables","payment_terms","notes"].includes(field.key); const disabled = fieldDisabled(field.key); return <label key={field.key} className={field.wide ? "wide" : ""}><span>{field.label}{missing ? <em className="field-flag missing">Missing</em> : low ? <em className="field-flag low">Low {score ? `${Math.round(score*100)}%` : "confidence"}</em> : score ? <em className="field-flag good">{Math.round(score*100)}%</em> : null}</span>{field.key === "status" ? <select disabled={disabled} value={String(value ?? saved.status)} onChange={e => setForm({...form,status:e.target.value})}>{contractStatuses.filter(item => statusOptions.includes(item)).map(item => <option key={item}>{item}</option>)}</select> : isLong ? <textarea disabled={disabled} value={(value as string) ?? ""} onChange={e => setForm({...form,[field.key]:e.target.value})}/> : <input disabled={disabled} type={field.type ?? "text"} value={(value as string | number) ?? ""} onChange={e => setForm({...form,[field.key]:field.type === "number" ? (e.target.value ? Number(e.target.value) : null) : e.target.value})}/>}</label>; })}</div>
           {saved.status === "Quoting" && <p className="wf-hint">To move past Quoting, validate the details and submit the contract on the Approvals tab.</p>}
         </>}
+        {tab === "AI assistant" && <AiPanel {...panelProps} />}
         {tab === "Approvals" && <ApprovalsPanel {...panelProps} />}
         {tab === "Comments" && <CommentsPanel {...panelProps} />}
         {tab === "Versions" && <VersionsPanel {...panelProps} />}

@@ -34,6 +34,7 @@ PERMISSIONS = {
     "user.manage": {"admin"},
     "reminders.run": {"admin"},
     "template.manage": {"admin", "legal"},
+    "ai.use": {"admin", "legal", "procurement", "finance"},
 }
 
 

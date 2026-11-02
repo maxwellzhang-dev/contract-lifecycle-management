@@ -8,7 +8,7 @@ export const obligationStatuses = ["Open", "Done", "Waived"] as const;
 
 export type Permission =
   | "contract.create" | "contract.edit" | "contract.delete" | "contract.validate"
-  | "approval.submit" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage";
+  | "approval.submit" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use";
 
 export type User = {
   id: number;
@@ -213,6 +213,39 @@ export type Template = {
   updated_at: string;
 };
 
+export type AiReviewResult = {
+  summary: string;
+  key_terms: { label: string; value: string; quote: string | null }[];
+  risks: { category: string; severity: "high" | "medium" | "low"; finding: string; quote: string | null; recommendation: string }[];
+  obligations: { title: string; kind: string; due_date: string | null; amount: number | null; currency: string | null; quote: string | null }[];
+  missing_clauses: string[];
+  field_mismatches: { field: string; record_value: string | null; document_value: string; quote: string | null }[];
+};
+
+export type AiReview = {
+  id: number;
+  document_version: number;
+  model: string;
+  created_by: string;
+  created_at: string;
+  stale: boolean;
+  result: AiReviewResult;
+};
+
+export type AiAnswer = { answer: string; found: boolean; citations: { quote: string; note: string | null }[] };
+export type AiQuestion = { id: number; question: string; answer: AiAnswer; asked_by: string; created_at: string; document_version: number | null };
+export type AiComparison = {
+  from_version: number;
+  to_version: number;
+  summary: string;
+  changes: { topic: string; before: string | null; after: string | null; impact: "favourable" | "unfavourable" | "neutral" | "unclear"; note: string }[];
+};
+export type AiFilters = {
+  search: string | null; status: string | null; vendor: string | null; department: string | null; owner: string | null;
+  tag: string | null; currency: string | null; min_value: number | null; max_value: number | null;
+  end_from: string | null; end_to: string | null; explanation: string;
+};
+
 export type DirectoryEntry = { id: number; name: string; role: string };
 
 /** Thrown for 401 responses so the app can return to the sign-in screen. */
@@ -293,6 +326,15 @@ export const api = {
   createTemplate: (values: Partial<Template>) => json<Template>("/api/templates", "POST", values),
   updateTemplate: (id: number, values: Partial<Template>) => json<Template>(`/api/templates/${id}`, "PATCH", values),
   createContract: (values: Record<string, unknown>) => json<Contract>("/api/contracts", "POST", values),
+
+  aiStatus: () => request<{ configured: boolean; model: string }>("/api/ai/status"),
+  aiReview: (id: number) => request<AiReview | null>(`/api/contracts/${id}/ai/review`),
+  runAiReview: (id: number) => json<AiReview>(`/api/contracts/${id}/ai/review`, "POST"),
+  aiQuestions: (id: number) => request<AiQuestion[]>(`/api/contracts/${id}/ai/questions`),
+  askAi: (id: number, question: string) => json<AiQuestion>(`/api/contracts/${id}/ai/questions`, "POST", { question }),
+  aiCompare: (id: number, from_version: number, to_version: number) =>
+    json<AiComparison>(`/api/contracts/${id}/ai/compare`, "POST", { from_version, to_version }),
+  aiSearch: (query: string) => json<AiFilters>("/api/ai/search", "POST", { query }),
 
   notifications: () => request<{ unread: number; items: Notification[] }>("/api/notifications"),
   readNotification: (id: number) => json<{ read: boolean }>(`/api/notifications/${id}/read`, "POST"),
