@@ -7,9 +7,9 @@ import { FormEvent, useEffect, useState } from "react";
 import { Check, Download, Plus, Trash2, X } from "lucide-react";
 import {
   api, approverRoles, can, fileUrl, obligationKinds, obligationStatuses,
-  type ApprovalRequest, type AuditItem, type Contract, type DirectoryEntry, type Obligation, type User, type Version,
+  type ApprovalRequest, type AuditItem, type Comment, type Contract, type DirectoryEntry, type Obligation, type User, type Version,
 } from "./api";
-import { AuditDetails, Status, amountLabel, dateLabel, dateTimeLabel, errorText, roleLabel } from "./shared";
+import { AuditDetails, Status, amountLabel, dateLabel, dateTimeLabel, errorText, initials, roleLabel } from "./shared";
 
 type PanelProps = { contract: Contract; user: User; onChanged: (contract: Contract) => Promise<void> };
 
@@ -186,6 +186,48 @@ export function ObligationsPanel({ contract, user }: PanelProps) {
       {manage ? <select aria-label="Obligation status" value={item.status} disabled={busy} onChange={e => void run(() => api.updateObligation(item.id, { status: e.target.value }))}>{obligationStatuses.map(s => <option key={s}>{s}</option>)}</select> : <Status value={item.overdue ? "Overdue" : item.status}/>}
       {manage && <button className="wf-icon-link" aria-label="Remove obligation" disabled={busy} onClick={() => { if (window.confirm(`Remove “${item.title}”?`)) void run(() => api.deleteObligation(item.id)); }}><Trash2 size={16}/></button>}
     </li>)}</ul>}
+  </div>;
+}
+
+// --- comments ------------------------------------------------------------------------
+
+/** Render a comment with @Full Name mentions of known people highlighted. */
+function CommentBody({ text, names }: { text: string; names: string[] }) {
+  if (!names.length) return <p>{text}</p>;
+  const escaped = [...names].sort((a, b) => b.length - a.length).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const parts = text.split(new RegExp(`(@(?:${escaped.join("|")}))(?![\\w])`, "gi"));
+  return <p>{parts.map((part, i) => i % 2 ? <mark key={i} className="wf-mention">{part}</mark> : part)}</p>;
+}
+
+export function CommentsPanel({ contract, user }: PanelProps) {
+  const { data: comments, error, reload } = useLoad(() => api.comments(contract.id), contract.id);
+  const { data: people } = useLoad(() => api.directory(), "directory");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const names = (people as DirectoryEntry[] | null)?.map(p => p.name) ?? [];
+
+  async function run(action: () => Promise<unknown>) {
+    setBusy(true); setMessage("");
+    try { await action(); reload(); } catch (err) { setMessage(errorText(err, "Action failed")); } finally { setBusy(false); }
+  }
+  function mention(name: string) { setText(current => `${current}${current && !current.endsWith(" ") ? " " : ""}@${name} `); }
+
+  return <div className="wf-panel">
+    {error && <p className="form-error">{error}</p>}
+    {comments && !comments.length && <p className="wf-hint">No comments yet. Start the discussion below.</p>}
+    <ul className="wf-comments">{comments?.map((c: Comment) => <li key={c.id}>
+      <span className="audit-avatar">{initials(c.author_name)}</span>
+      <div><header><strong>{c.author_name}</strong><small>{roleLabel(c.author_role)} · {dateTimeLabel(c.created_at)}</small>
+        {(c.user_id === user.id || user.role === "admin") && <button className="wf-link" disabled={busy} onClick={() => { if (window.confirm("Delete this comment?")) void run(() => api.deleteComment(c.id)); }}>Delete</button>}</header>
+        <CommentBody text={c.body} names={names} /></div>
+    </li>)}</ul>
+    <form className="wf-card" onSubmit={(e: FormEvent) => { e.preventDefault(); void run(async () => { await api.addComment(contract.id, text); setText(""); }); }}>
+      <label className="wf-field">Add a comment<textarea value={text} maxLength={4000} onChange={e => setText(e.target.value)} placeholder="Type @ and a full name to notify someone"/></label>
+      <div className="wf-chain"><small className="wf-hint">Mention:</small>{(people as DirectoryEntry[] | null)?.filter(p => p.id !== user.id).map(p => <button type="button" key={p.id} className="wf-chip" onClick={() => mention(p.name)}>@{p.name}</button>)}</div>
+      <button className="primary-button" disabled={busy || !text.trim()}>Post comment</button>
+    </form>
+    {message && <p className="form-error">{message}</p>}
   </div>;
 }
 

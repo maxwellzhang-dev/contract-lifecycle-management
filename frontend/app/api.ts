@@ -168,6 +168,16 @@ export type Notification = {
   read_at?: string | null;
 };
 
+export type Comment = {
+  id: number;
+  contract_id: number;
+  user_id: number;
+  author_name: string;
+  author_role: string;
+  body: string;
+  created_at: string;
+};
+
 export type DirectoryEntry = { id: number; name: string; role: string };
 
 /** Thrown for 401 responses so the app can return to the sign-in screen. */
@@ -232,6 +242,10 @@ export const api = {
     json<Obligation>(`/api/contracts/${contractId}/obligations`, "POST", values),
   updateObligation: (id: number, values: Partial<Obligation>) => json<Obligation>(`/api/obligations/${id}`, "PATCH", values),
   deleteObligation: (id: number) => json<{ deleted: boolean }>(`/api/obligations/${id}`, "DELETE"),
+
+  comments: (contractId: number) => request<Comment[]>(`/api/contracts/${contractId}/comments`),
+  addComment: (contractId: number, body: string) => json<Comment>(`/api/contracts/${contractId}/comments`, "POST", { body }),
+  deleteComment: (id: number) => json<{ deleted: boolean }>(`/api/comments/${id}`, "DELETE"),
 
   notifications: () => request<{ unread: number; items: Notification[] }>("/api/notifications"),
   readNotification: (id: number) => json<{ read: boolean }>(`/api/notifications/${id}/read`, "POST"),

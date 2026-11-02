@@ -32,8 +32,8 @@ def connection():
         conn.close()
 
 
-JSON_LIST_COLUMNS = ("missing_fields", "low_confidence_fields")
-JSON_DICT_COLUMNS = ("field_confidences",)
+JSON_LIST_COLUMNS = ("missing_fields", "low_confidence_fields", "tags")
+JSON_DICT_COLUMNS = ("field_confidences", "defaults")
 
 
 def rows_to_dicts(rows):
@@ -60,6 +60,7 @@ CREATE TABLE IF NOT EXISTS contracts (
     phase TEXT,
     status TEXT NOT NULL DEFAULT 'Quoting',
     status_before_hold TEXT,
+    tags TEXT NOT NULL DEFAULT '[]',
     project_start_date TEXT,
     project_end_date TEXT,
     renewal_date TEXT,
@@ -188,11 +189,31 @@ CREATE INDEX IF NOT EXISTS idx_contract_end_date ON contracts(project_end_date);
 CREATE INDEX IF NOT EXISTS idx_approval_contract ON approval_requests(contract_id);
 CREATE INDEX IF NOT EXISTS idx_obligation_contract ON obligations(contract_id);
 CREATE INDEX IF NOT EXISTS idx_obligation_due ON obligations(due_date);
+CREATE TABLE IF NOT EXISTS contract_comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    edited_at TEXT
+);
+CREATE TABLE IF NOT EXISTS contract_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    description TEXT,
+    body TEXT NOT NULL,
+    defaults TEXT NOT NULL DEFAULT '{}',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_notification_user ON notifications(user_id, read_at);
+CREATE INDEX IF NOT EXISTS idx_comment_contract ON contract_comments(contract_id);
 """
 
 # Columns added after the first prototype release; older databases get them via ALTER TABLE.
-ADDED_CONTRACT_COLUMNS = {"status_before_hold": "TEXT"}
+ADDED_CONTRACT_COLUMNS = {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'"}
 
 
 def migrate(conn):

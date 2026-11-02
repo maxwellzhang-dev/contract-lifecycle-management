@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table } from "@/components/ui/table";
 import { API_BASE, AuthError, api, can, contractStatuses, fileUrl, previewUrl, type AuditItem, type Contract, type Dashboard, type InboxItem, type User } from "./api";
-import { ApprovalsPanel, HistoryPanel, ObligationsPanel, VersionsPanel } from "./contract-panels";
+import { ApprovalsPanel, CommentsPanel, HistoryPanel, ObligationsPanel, VersionsPanel } from "./contract-panels";
 import { AuditDetails, EmptyState, SectionHeader, Status, dateLabel, errorText } from "./shared";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
@@ -247,8 +247,8 @@ const editableFields: { key: keyof Contract; label: string; type?: string; wide?
   {key:"title",label:"Contract title",wide:true},{key:"reference_number",label:"Reference number"},{key:"vendor_name",label:"Vendor name"},{key:"project_name",label:"Project / scope",wide:true},{key:"phase",label:"Phase"},{key:"status",label:"Contract status"},{key:"project_start_date",label:"Start date",type:"date"},{key:"project_end_date",label:"End date",type:"date"},{key:"renewal_date",label:"Renewal date",type:"date"},{key:"currency",label:"Currency"},{key:"one_time_amount",label:"One-time amount",type:"number"},{key:"optional_amount",label:"Optional amount",type:"number"},{key:"vendor_contact",label:"Vendor contact"},{key:"internal_contact",label:"Internal contact"},{key:"department",label:"Department"},{key:"owner",label:"Contract owner"},{key:"deliverables",label:"Deliverables / services",wide:true},{key:"payment_terms",label:"Payment terms",wide:true},{key:"notes",label:"Notes",wide:true},
 ];
 
-type DrawerTab = "Details" | "Approvals" | "Versions" | "Obligations" | "History";
-const drawerTabs: DrawerTab[] = ["Details", "Approvals", "Versions", "Obligations", "History"];
+type DrawerTab = "Details" | "Approvals" | "Comments" | "Versions" | "Obligations" | "History";
+const drawerTabs: DrawerTab[] = ["Details", "Approvals", "Comments", "Versions", "Obligations", "History"];
 
 function ContractDrawer({ contract, user, onClose, onSaved, onDeleted }: { contract: Contract; user: User; onClose: () => void; onSaved: (c: Contract) => Promise<void>; onDeleted: () => Promise<void> }) {
   const [form, setForm] = useState<Contract>(contract); const [saved, setSaved] = useState<Contract>(contract); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
@@ -277,6 +277,7 @@ function ContractDrawer({ contract, user, onClose, onSaved, onDeleted }: { contr
           {saved.status === "Quoting" && <p className="wf-hint">To move past Quoting, validate the details and submit the contract on the Approvals tab.</p>}
         </>}
         {tab === "Approvals" && <ApprovalsPanel {...panelProps} />}
+        {tab === "Comments" && <CommentsPanel {...panelProps} />}
         {tab === "Versions" && <VersionsPanel {...panelProps} />}
         {tab === "Obligations" && <ObligationsPanel {...panelProps} />}
         {tab === "History" && <HistoryPanel {...panelProps} />}
