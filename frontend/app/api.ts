@@ -1,5 +1,24 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/backend-api";
 
+export const contractStatuses = ["Quoting", "Under Review", "Cleared to Start", "In Progress", "Completed", "On Hold", "Cancelled"] as const;
+export const approverRoles = ["legal", "finance", "procurement", "admin"] as const;
+export const roles = ["admin", "legal", "procurement", "finance", "viewer"] as const;
+export const obligationKinds = ["Deliverable", "Payment", "Milestone", "Compliance", "Renewal", "Other"] as const;
+export const obligationStatuses = ["Open", "Done", "Waived"] as const;
+
+export type Permission =
+  | "contract.create" | "contract.edit" | "contract.delete" | "contract.validate"
+  | "approval.submit" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run";
+
+export type User = {
+  id: number;
+  email: string;
+  name: string;
+  role: string;
+  active: boolean;
+  permissions: Permission[];
+};
+
 export type Contract = {
   id: number;
   title: string;
@@ -33,6 +52,9 @@ export type Contract = {
   file_type?: string | null;
   upload_date?: string | null;
   uploaded_by?: string | null;
+  document_version: number;
+  pending_approval_id: number | null;
+  allowed_transitions: string[];
 };
 
 export type Dashboard = {
@@ -45,6 +67,9 @@ export type Dashboard = {
   awaiting_validation: number;
   missing_information: number;
   expiring_30_days: number;
+  pending_approvals: number;
+  obligations_overdue: number;
+  obligations_due_30_days: number;
   value_by_currency: { currency: string; value: number }[];
   total_value_by_currency: { currency: string; value: number }[];
   status_distribution: { status: string; count: number }[];
@@ -60,28 +85,165 @@ export type AuditItem = {
   vendor_name?: string;
 };
 
+export type ApprovalStep = {
+  id: number;
+  step_order: number;
+  role: string;
+  status: "Pending" | "Waiting" | "Approved" | "Rejected" | "Skipped";
+  decided_by?: number | null;
+  decided_by_name?: string | null;
+  decided_at?: string | null;
+  comment?: string | null;
+};
+
+export type ApprovalRequest = {
+  id: number;
+  contract_id: number;
+  status: "Pending" | "Approved" | "Rejected" | "Withdrawn" | "Cancelled";
+  submitted_by: number;
+  submitted_by_name: string;
+  note?: string | null;
+  submitted_at: string;
+  completed_at?: string | null;
+  steps: ApprovalStep[];
+};
+
+export type InboxItem = {
+  step_id: number;
+  role: string;
+  step_order: number;
+  total_steps: number;
+  request_id: number;
+  note?: string | null;
+  submitted_at: string;
+  submitted_by_name: string;
+  contract_id: number;
+  title: string;
+  vendor_name?: string | null;
+  currency?: string | null;
+  one_time_amount?: number | null;
+  optional_amount?: number | null;
+  project_start_date?: string | null;
+  project_end_date?: string | null;
+};
+
+export type Version = {
+  id: number;
+  version: number;
+  file_name?: string | null;
+  file_type?: string | null;
+  file_size?: number | null;
+  uploaded_by?: string | null;
+  uploaded_at: string;
+  note?: string | null;
+};
+
+export type Obligation = {
+  id: number;
+  contract_id: number;
+  contract_title: string;
+  contract_status: string;
+  vendor_name?: string | null;
+  title: string;
+  kind: string;
+  due_date?: string | null;
+  amount?: number | null;
+  currency?: string | null;
+  owner?: string | null;
+  status: string;
+  notes?: string | null;
+  completed_at?: string | null;
+  completed_by?: string | null;
+  days_until_due: number | null;
+  overdue: boolean;
+};
+
+export type Notification = {
+  id: number;
+  kind: string;
+  title: string;
+  body?: string | null;
+  contract_id?: number | null;
+  created_at: string;
+  read_at?: string | null;
+};
+
+export type DirectoryEntry = { id: number; name: string; role: string };
+
+/** Thrown for 401 responses so the app can return to the sign-in screen. */
+export class AuthError extends Error {}
+
 async function read<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.json().catch(() => ({ detail: "Request failed" }));
-    throw new Error(body.detail ?? `Request failed (${response.status})`);
+    const detail = typeof body.detail === "string" ? body.detail : `Request failed (${response.status})`;
+    if (response.status === 401) throw new AuthError(detail);
+    throw new Error(detail);
   }
   return response.json();
 }
 
+function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return fetch(`${API_BASE}${path}`, { credentials: "include", ...init }).then(read<T>);
+}
+
+function json<T>(path: string, method: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+export const fileUrl = (contractId: number, version?: number) =>
+  version ? `${API_BASE}/api/contracts/${contractId}/versions/${version}/file` : `${API_BASE}/api/contracts/${contractId}/file`;
+export const previewUrl = (contractId: number, version?: number) =>
+  version ? `${API_BASE}/api/contracts/${contractId}/versions/${version}/preview` : `${API_BASE}/api/contracts/${contractId}/preview`;
+
 export const api = {
-  dashboard: (months = 12) => fetch(`${API_BASE}/api/dashboard?months=${months}`).then(read<Dashboard>),
-  contracts: (query = "") => fetch(`${API_BASE}/api/contracts${query}`).then(read<Contract[]>),
-  audit: () => fetch(`${API_BASE}/api/audit`).then(read<AuditItem[]>),
-  update: (id: number, values: Partial<Contract>) =>
-    fetch(`${API_BASE}/api/contracts/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(values),
-    }).then(read<Contract>),
-  validate: (id: number) =>
-    fetch(`${API_BASE}/api/contracts/${id}/validate`, { method: "POST" }).then(read<Contract>),
-  remove: (id: number) =>
-    fetch(`${API_BASE}/api/contracts/${id}`, { method: "DELETE" }).then(read<{ deleted: boolean; id: number }>),
-  upload: (form: FormData) =>
-    fetch(`${API_BASE}/api/contracts/upload`, { method: "POST", body: form }).then(read<Contract>),
+  login: (email: string, password: string) => json<{ user: User }>("/api/auth/login", "POST", { email, password }),
+  logout: () => json<{ signed_out: boolean }>("/api/auth/logout", "POST"),
+  me: () => request<User>("/api/auth/me"),
+  changePassword: (current_password: string, new_password: string) =>
+    json<{ changed: boolean }>("/api/auth/password", "POST", { current_password, new_password }),
+
+  dashboard: (months = 12) => request<Dashboard>(`/api/dashboard?months=${months}`),
+  contracts: (query = "") => request<Contract[]>(`/api/contracts${query}`),
+  contract: (id: number) => request<Contract>(`/api/contracts/${id}`),
+  audit: (contractId?: number) => request<AuditItem[]>(`/api/audit${contractId ? `?contract_id=${contractId}` : ""}`),
+  update: (id: number, values: Partial<Contract>) => json<Contract>(`/api/contracts/${id}`, "PATCH", values),
+  validate: (id: number) => json<Contract>(`/api/contracts/${id}/validate`, "POST"),
+  remove: (id: number) => json<{ deleted: boolean; id: number }>(`/api/contracts/${id}`, "DELETE"),
+  upload: (form: FormData) => request<Contract>("/api/contracts/upload", { method: "POST", body: form }),
+
+  versions: (id: number) => request<Version[]>(`/api/contracts/${id}/versions`),
+  uploadVersion: (id: number, form: FormData) => request<Contract>(`/api/contracts/${id}/versions`, { method: "POST", body: form }),
+
+  approvals: (id: number) => request<ApprovalRequest[]>(`/api/contracts/${id}/approvals`),
+  submitApproval: (id: number, roles: string[], note: string) =>
+    json<ApprovalRequest>(`/api/contracts/${id}/approvals`, "POST", { roles, note }),
+  decide: (requestId: number, decision: "approve" | "reject", comment: string) =>
+    json<ApprovalRequest>(`/api/approvals/${requestId}/decision`, "POST", { decision, comment }),
+  withdraw: (requestId: number) => json<ApprovalRequest>(`/api/approvals/${requestId}/withdraw`, "POST"),
+  inbox: () => request<InboxItem[]>("/api/approvals/inbox"),
+
+  obligations: (query = "") => request<Obligation[]>(`/api/obligations${query}`),
+  createObligation: (contractId: number, values: Partial<Obligation>) =>
+    json<Obligation>(`/api/contracts/${contractId}/obligations`, "POST", values),
+  updateObligation: (id: number, values: Partial<Obligation>) => json<Obligation>(`/api/obligations/${id}`, "PATCH", values),
+  deleteObligation: (id: number) => json<{ deleted: boolean }>(`/api/obligations/${id}`, "DELETE"),
+
+  notifications: () => request<{ unread: number; items: Notification[] }>("/api/notifications"),
+  readNotification: (id: number) => json<{ read: boolean }>(`/api/notifications/${id}/read`, "POST"),
+  readAllNotifications: () => json<{ read: boolean }>("/api/notifications/read-all", "POST"),
+  runReminders: () => json<{ created: number }>("/api/reminders/run", "POST"),
+
+  directory: () => request<DirectoryEntry[]>("/api/users/directory"),
+  users: () => request<User[]>("/api/users"),
+  createUser: (values: { email: string; name: string; role: string; password: string }) => json<User>("/api/users", "POST", values),
+  updateUser: (id: number, values: Partial<User> & { password?: string }) => json<User>(`/api/users/${id}`, "PATCH", values),
 };
+
+export function can(user: User | null, permission: Permission) {
+  return !!user && user.permissions.includes(permission);
+}

@@ -129,6 +129,7 @@ az containerapp create \
   --secrets \
     azure-openai-endpoint="$AZURE_OPENAI_ENDPOINT" \
     azure-openai-api-key="$AZURE_OPENAI_API_KEY" \
+    clause-seed-password="$CLAUSE_SEED_PASSWORD" \
   --env-vars \
     PORT=8000 \
     DATABASE_PATH=/data/contracts.db \
@@ -136,8 +137,13 @@ az containerapp create \
     AZURE_OPENAI_ENDPOINT=secretref:azure-openai-endpoint \
     AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key \
     AZURE_OPENAI_DEPLOYMENT=$AZURE_OPENAI_DEPLOYMENT \
-    AZURE_OPENAI_API_VERSION=$AZURE_OPENAI_API_VERSION
+    AZURE_OPENAI_API_VERSION=$AZURE_OPENAI_API_VERSION \
+    CLAUSE_SEED_PASSWORD=secretref:clause-seed-password \
+    COOKIE_SECURE=1 \
+    SEED_DEMO_DATA=0
 ```
+
+Set `CLAUSE_SEED_PASSWORD` to a strong value before the first start. It becomes the initial password of the seeded accounts (see the README), so sign in and change each one, or deactivate the ones you do not need. `COOKIE_SECURE=1` restricts the session cookie to HTTPS. Keep `--max-replicas 1`: SQLite and the in-process reminder job both assume a single API replica.
 
 The backend is internal-only. Other Container Apps in the same environment can call it by app name:
 
