@@ -1,0 +1,14 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+backend/data/contracts.db
+backend/data/uploads/*
+!backend/data/uploads/.gitkeep
+frontend/node_modules/
+frontend/.next/
+frontend/dist/
+frontend/.wrangler/
+.DS_Store
+
+frontend/.vinext/

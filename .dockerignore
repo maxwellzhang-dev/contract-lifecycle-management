@@ -1,0 +1,16 @@
+.git
+.venv
+backend/data
+backend/app/__pycache__
+backend/app/services/__pycache__
+frontend/node_modules
+frontend/dist
+frontend/.vinext
+frontend/.wrangler
+frontend/.next
+frontend/npm-debug.log*
+*.py[cod]
+.DS_Store
+.env
+.env.*
+keyv-and-cacheable-compromise-packages*.csv
