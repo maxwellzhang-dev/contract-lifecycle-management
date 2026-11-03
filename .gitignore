@@ -12,3 +12,4 @@ frontend/.wrangler/
 .DS_Store
 
 frontend/.vinext/
+*.tsbuildinfo

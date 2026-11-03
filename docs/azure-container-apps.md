@@ -140,8 +140,11 @@ az containerapp create \
     AZURE_OPENAI_API_VERSION=$AZURE_OPENAI_API_VERSION \
     CLAUSE_SEED_PASSWORD=secretref:clause-seed-password \
     COOKIE_SECURE=1 \
+    PUBLIC_APP_URL="https://<frontend-app-fqdn>" \
     SEED_DEMO_DATA=0
 ```
+
+Set `PUBLIC_APP_URL` to the frontend's public address: e-signature links point there.
 
 Set `CLAUSE_SEED_PASSWORD` to a strong value before the first start. It becomes the initial password of the seeded accounts (see the README), so sign in and change each one, or deactivate the ones you do not need. `COOKIE_SECURE=1` restricts the session cookie to HTTPS. Keep `--max-replicas 1`: SQLite and the in-process reminder job both assume a single API replica.
 

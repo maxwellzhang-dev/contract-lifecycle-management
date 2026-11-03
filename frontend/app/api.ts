@@ -8,7 +8,7 @@ export const obligationStatuses = ["Open", "Done", "Waived"] as const;
 
 export type Permission =
   | "contract.create" | "contract.edit" | "contract.delete" | "contract.validate"
-  | "approval.submit" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use";
+  | "approval.submit" | "signature.send" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use";
 
 export type User = {
   id: number;
@@ -53,6 +53,7 @@ export type Contract = {
   upload_date?: string | null;
   uploaded_by?: string | null;
   document_version: number;
+  signed_at?: string | null;
   tags: string[];
   pending_approval_id: number | null;
   allowed_transitions: string[];
@@ -267,6 +268,47 @@ export type AiFilters = {
   end_from: string | null; end_to: string | null; explanation: string;
 };
 
+export type Signer = {
+  id: number;
+  signer_order: number;
+  name: string;
+  email: string;
+  status: "Waiting" | "Pending" | "Signed" | "Declined";
+  viewed_at: string | null;
+  signed_name: string | null;
+  signed_at: string | null;
+  decline_reason: string | null;
+  token_expires_at: string | null;
+  link: string | null;
+};
+export type SignatureRequest = {
+  id: number;
+  contract_id: number;
+  status: "Sent" | "Completed" | "Declined" | "Voided";
+  document_version: number;
+  document_sha256: string;
+  file_name: string | null;
+  message: string | null;
+  created_by_name: string;
+  created_at: string;
+  completed_at: string | null;
+  void_reason: string | null;
+  has_signed_copy: boolean;
+  signers: Signer[];
+};
+export type SigningView = {
+  request_status: SignatureRequest["status"];
+  contract_title: string;
+  vendor_name: string | null;
+  file_name: string | null;
+  file_type: string | null;
+  document_sha256: string;
+  message: string | null;
+  signer: { name: string; email: string; status: Signer["status"]; signed_at: string | null; signer_order: number };
+  signers: { name: string; status: Signer["status"]; signer_order: number; signed_at: string | null }[];
+  can_sign: boolean;
+};
+
 export type DirectoryEntry = { id: number; name: string; role: string };
 
 /** Thrown for 401 responses so the app can return to the sign-in screen. */
@@ -296,6 +338,8 @@ function json<T>(path: string, method: string, body?: unknown): Promise<T> {
 
 export const fileUrl = (contractId: number, version?: number) =>
   version ? `${API_BASE}/api/contracts/${contractId}/versions/${version}/file` : `${API_BASE}/api/contracts/${contractId}/file`;
+export const signedCopyUrl = (requestId: number) => `${API_BASE}/api/signatures/${requestId}/signed-copy`;
+export const signingDocumentUrl = (token: string) => `${API_BASE}/api/sign/${encodeURIComponent(token)}/document`;
 export const previewUrl = (contractId: number, version?: number) =>
   version ? `${API_BASE}/api/contracts/${contractId}/versions/${version}/preview` : `${API_BASE}/api/contracts/${contractId}/preview`;
 
@@ -355,6 +399,15 @@ export const api = {
   askAi: (id: number, question: string) => json<AiQuestion>(`/api/contracts/${id}/ai/questions`, "POST", { question }),
   aiCompare: (id: number, from_version: number, to_version: number) =>
     json<AiComparison>(`/api/contracts/${id}/ai/compare`, "POST", { from_version, to_version }),
+  signatures: (id: number) => request<SignatureRequest[]>(`/api/contracts/${id}/signatures`),
+  sendForSignature: (id: number, signers: { name: string; email: string }[], message: string) =>
+    json<SignatureRequest>(`/api/contracts/${id}/signatures`, "POST", { signers, message }),
+  newSigningLink: (requestId: number, signerId: number) => json<SignatureRequest>(`/api/signatures/${requestId}/signers/${signerId}/link`, "POST"),
+  voidSignature: (requestId: number, reason: string) => json<SignatureRequest>(`/api/signatures/${requestId}/void`, "POST", { reason }),
+  signingView: (token: string) => request<SigningView>(`/api/sign/${encodeURIComponent(token)}`),
+  sign: (token: string, signed_name: string, signature_image: string | null) =>
+    json<SigningView>(`/api/sign/${encodeURIComponent(token)}`, "POST", { signed_name, consent: true, signature_image }),
+  declineSigning: (token: string, reason: string) => json<SigningView>(`/api/sign/${encodeURIComponent(token)}/decline`, "POST", { reason }),
   portfolioHistory: () => request<PortfolioAnswer[]>("/api/ai/portfolio"),
   askPortfolio: (question: string) => json<PortfolioAnswer>("/api/ai/portfolio", "POST", { question }),
   aiSearch: (query: string) => json<AiFilters>("/api/ai/search", "POST", { query }),

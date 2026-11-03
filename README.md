@@ -68,13 +68,26 @@ Notes:
 - Model output can be wrong. Quotes are shown so reviewers can check them, and nothing changes a contract until a person clicks.
 - Every AI review and comparison is recorded in the audit trail.
 
+## E-signature
+
+Approved contracts (`Cleared to Start` or `In Progress`) with a document can be sent for signature from the contract's **Signatures** tab.
+
+- Add signers in order (vendor and internal). Each signer gets a personal link when it is their turn; they do not need an account. Links expire after `SIGNING_LINK_DAYS` (default 30) and stop working once used.
+- Links are emailed when SMTP is configured, and shown once to the sender so they can be shared another way. Signers who are Clause users also get an in-app notification. A sender can resend a fresh link (the old one stops working).
+- The signer reads the document, types their full name exactly as sent (and can draw a signature), and agrees to sign electronically. They can also decline with a reason, which notifies the sender.
+- The document version is frozen by its SHA-256 fingerprint. Signing is refused if the stored file no longer matches, and new versions cannot be uploaded while a request is open. Putting the contract on hold or cancelling it voids the request.
+- When everyone has signed, Clause produces a signed copy: the original PDF followed by a certificate of completion with each signer's name, email, time, IP address, device and signature, plus the document fingerprint. For DOCX and images, the certificate is produced on its own.
+- Every step (sent, opened, signed, declined, voided, completed) is recorded in the audit trail.
+
+This is a simple electronic signature with an audit trail, suitable for most commercial agreements. Contracts that need a qualified or advanced electronic signature (for example under eIDAS) or a certificate-based digital signature need a dedicated signing provider.
+
 ## Roles
 
 | Role | Can do |
 | --- | --- |
-| `admin` | Everything, including deleting contracts, managing users and running reminders. Can decide any approval step. |
-| `legal` | Upload, create, edit, validate, submit for approval, manage obligations and templates, decide `legal` steps |
-| `procurement` | Upload, create, edit, validate, submit for approval, manage obligations, decide `procurement` steps |
+| `admin` | Everything, including deleting contracts, managing users and running reminders. Can decide any approval step and void any signature request. |
+| `legal` | Upload, create, edit, validate, submit for approval, send for signature, manage obligations and templates, decide `legal` steps |
+| `procurement` | Upload, create, edit, validate, submit for approval, send for signature, manage obligations, decide `procurement` steps |
 | `finance` | Edit, manage obligations, decide `finance` steps |
 | `viewer` | Read only, plus comments; can read saved AI reviews but not run AI features (no audit trail) |
 

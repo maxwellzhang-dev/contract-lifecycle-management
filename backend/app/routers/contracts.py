@@ -359,6 +359,16 @@ def update_contract(contract_id: int, update: ContractUpdate, user: dict = Depen
             if pending and target in {"On Hold", "Cancelled"}:
                 close_approval(conn, pending["id"], "Cancelled")
                 add_audit(conn, "Approval cancelled", user["name"], contract_id, f"Contract moved to {target}")
+            if target in {"On Hold", "Cancelled"}:
+                voided = conn.execute(
+                    "UPDATE signature_requests SET status='Voided', completed_at=?, void_reason=? WHERE contract_id=? AND status='Sent'",
+                    (utc_now(), f"Contract moved to {target}", contract_id),
+                ).rowcount
+                if voided:
+                    conn.execute(
+                        "UPDATE signature_signers SET token_hash=NULL WHERE request_id IN (SELECT id FROM signature_requests WHERE contract_id=?)",
+                        (contract_id,))
+                    add_audit(conn, "Signature request voided", user["name"], contract_id, f"Contract moved to {target}")
         missing_fields = json.loads(old["missing_fields"] or "[]")
         low_confidence_fields = json.loads(old["low_confidence_fields"] or "[]")
         field_confidences = json.loads(old["field_confidences"] or "{}")
@@ -424,6 +434,8 @@ def upload_version(
         contract = load_contract(conn, contract_id)
         if pending_approval(conn, contract_id):
             raise HTTPException(409, "This contract is awaiting approval. Withdraw the request before uploading a new version.")
+        if conn.execute("SELECT 1 FROM signature_requests WHERE contract_id=? AND status='Sent'", (contract_id,)).fetchone():
+            raise HTTPException(409, "This contract is out for signature. Void the signature request before uploading a new version.")
         if contract["status"] in {"Completed", "Cancelled"}:
             raise HTTPException(409, f"{contract['status']} contracts cannot receive new document versions.")
     destination = save_upload(file)

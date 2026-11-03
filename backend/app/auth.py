@@ -35,6 +35,7 @@ PERMISSIONS = {
     "reminders.run": {"admin"},
     "template.manage": {"admin", "legal"},
     "ai.use": {"admin", "legal", "procurement", "finance"},
+    "signature.send": {"admin", "legal", "procurement"},
 }
 
 

@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS contracts (
     file_path TEXT,
     file_size INTEGER,
     document_version INTEGER NOT NULL DEFAULT 1,
+    signed_at TEXT,
     uploaded_by TEXT,
     upload_date TEXT,
     created_at TEXT NOT NULL,
@@ -236,13 +237,50 @@ CREATE TABLE IF NOT EXISTS ai_portfolio_questions (
     answer TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS signature_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'Sent',
+    document_version INTEGER NOT NULL,
+    document_sha256 TEXT NOT NULL,
+    file_name TEXT,
+    file_type TEXT,
+    file_path TEXT NOT NULL,
+    message TEXT,
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL,
+    completed_at TEXT,
+    signed_file_path TEXT,
+    signed_file_sha256 TEXT,
+    void_reason TEXT
+);
+CREATE TABLE IF NOT EXISTS signature_signers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL REFERENCES signature_requests(id) ON DELETE CASCADE,
+    signer_order INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL,
+    user_id INTEGER REFERENCES users(id),
+    status TEXT NOT NULL DEFAULT 'Waiting',
+    token_hash TEXT UNIQUE,
+    token_expires_at TEXT,
+    viewed_at TEXT,
+    signed_name TEXT,
+    signature_image TEXT,
+    signed_at TEXT,
+    ip_address TEXT,
+    user_agent TEXT,
+    decline_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_signature_contract ON signature_requests(contract_id);
+CREATE INDEX IF NOT EXISTS idx_signer_request ON signature_signers(request_id);
 CREATE INDEX IF NOT EXISTS idx_ai_review_contract ON ai_reviews(contract_id);
 CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id);
 """
 
 # Columns added after the first prototype release; older databases get them via ALTER TABLE.
 ADDED_COLUMNS = {
-    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'"},
+    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT"},
     "approval_requests": {"ai_review_id": "INTEGER"},
 }
 
