@@ -2,8 +2,8 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { AlertTriangle, Check, MessageSquareText, Plus, Sparkles } from "lucide-react";
-import { api, can, type AiComparison, type AiFilters, type AiQuestion, type AiReview, type Contract, type User, type Version } from "./api";
-import { amountLabel, dateLabel, dateTimeLabel, errorText } from "./shared";
+import { api, can, type PortfolioAnswer, type AiComparison, type AiFilters, type AiQuestion, type AiReview, type Contract, type User, type Version } from "./api";
+import { SectionHeader, Status, amountLabel, dateLabel, dateTimeLabel, errorText } from "./shared";
 import { emptyFilters, type Filters } from "./filters";
 
 type PanelProps = { contract: Contract; user: User; onChanged: (contract: Contract) => Promise<void> };
@@ -207,4 +207,52 @@ export function AiSearch({ onApply }: { onApply: (filters: Filters, search: stri
     <button className="secondary-button" disabled={busy || !query.trim()}>{busy ? "Working…" : "Find"}</button>
     {error && <p className="form-error">{error}</p>}
   </form>;
+}
+
+const portfolioExamples = [
+  "Which contracts end in the next 90 days, and what is their total value per currency?",
+  "Which vendors have contracts with high AI risks?",
+  "What payments are due this quarter?",
+  "Which contracts are waiting for finance approval?",
+];
+
+/** Questions across the whole portfolio, answered from records, obligations, approvals and AI reviews. */
+export function PortfolioView({ onOpen }: { onOpen: (contractId: number) => void }) {
+  const [history, setHistory] = useState<PortfolioAnswer[]>([]);
+  const [question, setQuestion] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [configured, setConfigured] = useState(true);
+  useEffect(() => {
+    let cancelled = false;
+    api.aiStatus().then(s => { if (!cancelled) setConfigured(s.configured); }).catch(() => undefined);
+    api.portfolioHistory().then(h => { if (!cancelled) setHistory(h); }).catch(err => { if (!cancelled) setError(errorText(err, "Could not load history")); });
+    return () => { cancelled = true; };
+  }, []);
+  async function ask(text: string) {
+    setBusy(true); setError("");
+    try { const item = await api.askPortfolio(text); setHistory([item, ...history]); setQuestion(""); }
+    catch (err) { setError(errorText(err, "Could not get an answer")); }
+    finally { setBusy(false); }
+  }
+  return <>
+    <SectionHeader eyebrow="AI ASSISTANT" title="Ask about your portfolio" copy="Answers come from contract records, obligations, approvals and the latest AI reviews — every contract it relies on is linked." />
+    {!configured && <p className="wf-hint warn">AI features are off: add the Azure OpenAI settings to <code>.env</code> and restart the API.</p>}
+    <section className="panel portfolio-ask">
+      <form className="ai-ask" onSubmit={e => { e.preventDefault(); void ask(question); }}>
+        <input value={question} maxLength={1000} onChange={e => setQuestion(e.target.value)} placeholder="e.g. Which contracts renew next quarter and who owns them?" aria-label="Portfolio question" />
+        <button className="primary-button" disabled={busy || !question.trim() || !configured}>{busy ? "Thinking…" : "Ask"}</button>
+      </form>
+      <div className="portfolio-examples">{portfolioExamples.map(example => <button key={example} className="wf-chip" disabled={busy || !configured} onClick={() => void ask(example)}>{example}</button>)}</div>
+      {error && <p className="form-error">{error}</p>}
+    </section>
+    <ul className="ai-answers portfolio-answers">{history.map(item => <li key={item.id} className="panel">
+      <p className="ai-q">{item.question}<small> — {dateTimeLabel(item.created_at)}</small></p>
+      <p className={item.answer.found ? "ai-a" : "ai-a notfound"}>{item.answer.found ? "" : "Not answerable from the data: "}{item.answer.answer}</p>
+      {item.answer.contracts.length > 0 && <div className="portfolio-refs">{item.answer.contracts.map(c => <button key={c.id} onClick={() => onOpen(c.id)}>
+        <div><strong>{c.title}</strong><small>{c.vendor_name ?? "Vendor not identified"} · {c.reason}</small></div><Status value={c.status} />
+      </button>)}</div>}
+    </li>)}</ul>
+    {history.length > 0 && <p className="wf-hint ai-disclaimer">AI output can be wrong. Open the linked contracts to check before acting.</p>}
+  </>;
 }

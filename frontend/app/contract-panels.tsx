@@ -83,6 +83,7 @@ function ApprovalCard({ request, user, comment, setComment, busy, onDecide, onWi
   return <article className="wf-card">
     <header className="wf-card-head"><div><h3>Approval request #{request.id}</h3><small>Submitted by {request.submitted_by_name} · {dateTimeLabel(request.submitted_at)}</small></div><Status value={request.status} /></header>
     {request.note && <p className="wf-note">“{request.note}”</p>}
+    {request.status === "Pending" && <AiBrief request={request} />}
     <ol className="wf-steps">{request.steps.map(step => <li key={step.id} className={`wf-step ${step.status.toLowerCase()}`}>
       <span className="wf-step-dot">{step.status === "Approved" ? <Check size={13}/> : step.status === "Rejected" ? <X size={13}/> : step.step_order}</span>
       <div><strong>{roleLabel(step.role)}</strong><small>{step.status === "Pending" ? "Waiting for decision" : step.status === "Waiting" ? "After previous step" : step.decided_by_name ? `${step.status} by ${step.decided_by_name} · ${dateTimeLabel(step.decided_at)}` : step.status}</small>{step.comment && <p>{step.comment}</p>}</div>
@@ -94,6 +95,22 @@ function ApprovalCard({ request, user, comment, setComment, busy, onDecide, onWi
     {!canDecide && current && request.status === "Pending" && <p className="wf-hint">Waiting for a {current.role} approver{request.submitted_by === user.id ? " (you submitted this request)" : ""}.</p>}
     {canWithdraw && onWithdraw && <button className="secondary-button" disabled={busy} onClick={onWithdraw}>Withdraw request</button>}
   </article>;
+}
+
+function AiBrief({ request }: { request: ApprovalRequest }) {
+  const brief = request.ai_review;
+  if (!brief) {
+    if (request.ai_review_state === "running") return <p className="wf-hint ai-brief-running">AI review of the submitted document is running… refresh in a minute.</p>;
+    return null;
+  }
+  const { high, medium, low } = brief.risk_counts;
+  return <div className={high ? "ai-brief high" : "ai-brief"}>
+    <div className="ai-brief-head"><strong>AI review for approvers</strong><span className="ai-sev high">{high} high</span><span className="ai-sev medium">{medium} medium</span><span className="ai-sev low">{low} low</span></div>
+    <p>{brief.summary}</p>
+    {brief.top_risks.length > 0 && <ul>{brief.top_risks.map((r, i) => <li key={i}><span className={`ai-sev ${r.severity}`}>{r.severity}</span> {r.category}: {r.finding}</li>)}</ul>}
+    {brief.missing_clauses.length > 0 && <small>Possibly missing: {brief.missing_clauses.join(", ")}</small>}
+    <small>Document v{brief.document_version} · see the AI assistant tab for quotes and details. AI output can be wrong.</small>
+  </div>;
 }
 
 // --- versions ------------------------------------------------------------------------

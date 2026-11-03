@@ -107,6 +107,19 @@ export type ApprovalRequest = {
   submitted_at: string;
   completed_at?: string | null;
   steps: ApprovalStep[];
+  ai_review: AiReviewBrief | null;
+  ai_review_state: "attached" | "running" | "none";
+};
+
+export type RiskCounts = { high: number; medium: number; low: number };
+export type AiReviewBrief = {
+  id: number;
+  document_version: number;
+  created_at: string;
+  summary: string;
+  risk_counts: RiskCounts;
+  top_risks: { category: string; severity: "high" | "medium" | "low"; finding: string }[];
+  missing_clauses: string[];
 };
 
 export type InboxItem = {
@@ -126,6 +139,7 @@ export type InboxItem = {
   optional_amount?: number | null;
   project_start_date?: string | null;
   project_end_date?: string | null;
+  ai_risk_counts: RiskCounts | null;
 };
 
 export type Version = {
@@ -240,6 +254,13 @@ export type AiComparison = {
   summary: string;
   changes: { topic: string; before: string | null; after: string | null; impact: "favourable" | "unfavourable" | "neutral" | "unclear"; note: string }[];
 };
+export type PortfolioAnswer = {
+  id: number;
+  question: string;
+  asked_by: string;
+  created_at: string;
+  answer: { answer: string; found: boolean; contracts: { id: number; reason: string; title: string; vendor_name: string | null; status: string }[] };
+};
 export type AiFilters = {
   search: string | null; status: string | null; vendor: string | null; department: string | null; owner: string | null;
   tag: string | null; currency: string | null; min_value: number | null; max_value: number | null;
@@ -334,6 +355,8 @@ export const api = {
   askAi: (id: number, question: string) => json<AiQuestion>(`/api/contracts/${id}/ai/questions`, "POST", { question }),
   aiCompare: (id: number, from_version: number, to_version: number) =>
     json<AiComparison>(`/api/contracts/${id}/ai/compare`, "POST", { from_version, to_version }),
+  portfolioHistory: () => request<PortfolioAnswer[]>("/api/ai/portfolio"),
+  askPortfolio: (question: string) => json<PortfolioAnswer>("/api/ai/portfolio", "POST", { question }),
   aiSearch: (query: string) => json<AiFilters>("/api/ai/search", "POST", { query }),
 
   notifications: () => request<{ unread: number; items: Notification[] }>("/api/notifications"),

@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { BarChart3, Building2, FilePlus2, FileStack, CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Building2, FilePlus2, FileStack, CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Sparkles, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table } from "@/components/ui/table";
@@ -10,15 +10,16 @@ import { ApprovalsPanel, CommentsPanel, HistoryPanel, ObligationsPanel, Versions
 import { AuditDetails, EmptyState, SectionHeader, Status, dateLabel, errorText } from "./shared";
 import { AdvancedFilters, TagEditor, Tags, activeFilterCount, emptyFilters, exportUrl, filterContracts, type Filters } from "./filters";
 import { ReportsView, VendorsView } from "./insights";
-import { AiPanel, AiSearch } from "./ai-panel";
+import { AiPanel, AiSearch, PortfolioView } from "./ai-panel";
 import { NewContractModal, TemplatesView } from "./templates";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
-type View = "Overview" | "Contracts" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Templates" | "Audit trail" | "Users";
+type View = "Overview" | "Contracts" | "AI assistant" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Templates" | "Audit trail" | "Users";
 type PeriodMonths = 0 | 1 | 3 | 6 | 12; // 0 = any start date
 
 const navItems: { name: View; label: string; icon: LucideIcon; visible?: (user: User) => boolean }[] = [
   { name: "Overview", label: "Overview", icon: LayoutDashboard }, { name: "Contracts", label: "Contract management", icon: FileText },
+  { name: "AI assistant", label: "AI assistant", icon: Sparkles, visible: user => can(user, "ai.use") },
   { name: "Approvals", label: "Approvals", icon: Stamp }, { name: "Review queue", label: "Review queue", icon: ClipboardCheck },
   { name: "Obligations", label: "Obligations", icon: ListChecks }, { name: "Renewals", label: "Renewals", icon: RefreshCw },
   { name: "Vendors", label: "Vendors", icon: Building2 }, { name: "Reports", label: "Reports", icon: BarChart3 },
@@ -152,6 +153,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
         {loading ? <div className="loading-state"><span /><p>Loading your contract portfolio…</p></div> : <>
           {view === "Overview" && <Overview dashboard={dashboard} contracts={contracts} inbox={inbox} onSelect={setSelected} onNavigate={navigate} />}
           {view === "Contracts" && <ContractsView user={user} contracts={filtered} allContracts={contracts} filters={filters} setFilters={setFilters} search={search} setSearch={setSearch} periodMonths={periodMonths} setPeriodMonths={setPeriodMonths} onSelect={setSelected} />}
+          {view === "AI assistant" && <PortfolioView onOpen={id => void openContract(id)} />}
           {view === "Approvals" && <ApprovalsView items={inbox} onOpen={id => void openContract(id)} />}
           {view === "Review queue" && <ReviewView contracts={reviewQueue} onSelect={setSelected} />}
           {view === "Obligations" && <ObligationsView key={refreshKey} user={user} onOpen={id => void openContract(id)} />}

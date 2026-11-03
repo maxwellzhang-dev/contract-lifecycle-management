@@ -642,3 +642,26 @@ nav .nav-item:nth-child(12) { --sec: var(--hue-indigo); --sec-bg: var(--hue-indi
 .ai-note{margin:-4px 0 12px}
 .wf-list small del{color:#be123c}
 .wf-list small ins{color:#16805a;text-decoration:none}
+
+/* AI review attached to approvals */
+.ai-brief{border:1px solid #d9d6ff;background:#f7f6ff;border-radius:10px;padding:12px 14px;margin:10px 0;display:grid;gap:6px}
+.ai-brief.high{border-color:#fecdd6;background:#fff7f8}
+.ai-brief-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
+.ai-brief-head strong{margin-right:auto;font-size:14px}
+.ai-brief p{margin:0;font-size:14px;line-height:1.5}
+.ai-brief ul{margin:0;padding:0;list-style:none;display:grid;gap:4px;font-size:13px}
+.ai-brief small{color:var(--muted);font-size:12px}
+.ai-brief-running{font-style:italic}
+
+/* Portfolio assistant */
+.portfolio-ask{padding:18px;display:grid;gap:12px}
+.portfolio-examples{display:flex;flex-wrap:wrap;gap:8px}
+.portfolio-examples .wf-chip{cursor:pointer;border:1px solid var(--line);background:#fff;text-align:left}
+.portfolio-examples .wf-chip:hover:not(:disabled){border-color:#c9c4ff}
+.portfolio-answers{margin-top:16px;display:grid;gap:12px;padding:0;list-style:none}
+.portfolio-answers>li{padding:16px 18px}
+.portfolio-refs{display:grid;gap:6px;margin-top:10px}
+.portfolio-refs button{display:flex;align-items:center;gap:12px;text-align:left;border:1px solid var(--line);background:#fff;border-radius:10px;padding:10px 12px}
+.portfolio-refs button:hover{border-color:#c9c4ff}
+.portfolio-refs button>div{flex:1;min-width:0}
+.portfolio-refs small{display:block;color:var(--muted);font-size:13px;margin-top:2px}

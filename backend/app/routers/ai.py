@@ -1,6 +1,8 @@
 """LLM features: contract review, Q&A, version comparison and natural-language search."""
 
 import json
+import logging
+import os
 from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +17,7 @@ from ..workflow import CONTRACT_STATUSES, OBLIGATION_KINDS
 from .contracts import load_contract
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger("clause.ai")
 
 RISK_CATEGORIES = ["Liability", "Indemnity", "Termination", "Renewal", "Payment", "Confidentiality",
                    "Data protection", "Intellectual property", "Service levels", "Governing law", "Other"]
@@ -161,23 +164,74 @@ def clean_review(result: dict) -> dict:
     return result
 
 
-@router.post("/contracts/{contract_id}/ai/review", status_code=201)
-def run_review(contract_id: int, user: dict = Depends(require("ai.use"))):
+def generate_review(contract_id: int, actor: str) -> dict:
+    """Run an AI review of the contract's current document and store it. Raises llm.LLMUnavailable."""
     with connection() as conn:
         contract = load_contract(conn, contract_id)
     body, images = contract_material(contract)
-    result = clean_review(call(REVIEW_PROMPT, body, "contract_review", REVIEW_SCHEMA, images=images, effort="medium"))
+    result = clean_review(llm.structured(REVIEW_PROMPT, body, "contract_review", REVIEW_SCHEMA, images=images, effort="medium"))
     with connection() as conn:
         cursor = conn.execute(
             "INSERT INTO ai_reviews (contract_id, document_version, result, model, created_by, created_at) VALUES (?,?,?,?,?,?)",
-            (contract_id, contract["document_version"], json.dumps(result), llm.model_name(), user["name"], utc_now()),
+            (contract_id, contract["document_version"], json.dumps(result), llm.model_name(), actor, utc_now()),
         )
         high = sum(r["severity"] == "high" for r in result["risks"])
-        add_audit(conn, "AI review generated", user["name"], contract_id,
+        add_audit(conn, "AI review generated", actor, contract_id,
                   f"{len(result['risks'])} risk(s), {high} high; {len(result['obligations'])} obligation(s) suggested")
         review = review_out(conn.execute("SELECT * FROM ai_reviews WHERE id=?", (cursor.lastrowid,)).fetchone())
     review["stale"] = False
     return review
+
+
+def current_review_id(conn, contract) -> int | None:
+    row = conn.execute(
+        "SELECT id FROM ai_reviews WHERE contract_id=? AND document_version=? ORDER BY id DESC LIMIT 1",
+        (contract["id"], contract["document_version"]),
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def review_brief(conn, review_id: int | None) -> dict | None:
+    """Risk counts and summary of a stored review, for approvers."""
+    if not review_id:
+        return None
+    row = conn.execute("SELECT * FROM ai_reviews WHERE id=?", (review_id,)).fetchone()
+    if not row:
+        return None
+    result = json.loads(row["result"])
+    counts = {level: sum(r["severity"] == level for r in result.get("risks", [])) for level in ("high", "medium", "low")}
+    return {"id": row["id"], "document_version": row["document_version"], "created_at": row["created_at"],
+            "summary": result.get("summary", ""), "risk_counts": counts,
+            "top_risks": [{k: r[k] for k in ("category", "severity", "finding")} for r in result.get("risks", [])[:3]],
+            "missing_clauses": result.get("missing_clauses", [])}
+
+
+def auto_review_enabled() -> bool:
+    return llm.configured() and os.getenv("AI_REVIEW_ON_SUBMIT", "1") == "1"
+
+
+def review_for_approval(request_id: int, contract_id: int):
+    """Background task after submission: make sure approvers see an AI review of the submitted version."""
+    try:
+        review = generate_review(contract_id, "Clause AI")
+    except Exception as exc:  # the approval itself must never fail because the AI did
+        log.warning("Automatic AI review for contract %s failed: %s", contract_id, exc)
+        with connection() as conn:
+            add_audit(conn, "AI review failed", "Clause AI", contract_id, str(exc)[:300])
+        return
+    with connection() as conn:
+        conn.execute("UPDATE approval_requests SET ai_review_id=? WHERE id=? AND ai_review_id IS NULL",
+                     (review["id"], request_id))
+
+
+@router.post("/contracts/{contract_id}/ai/review", status_code=201)
+def run_review(contract_id: int, user: dict = Depends(require("ai.use"))):
+    with connection() as conn:
+        load_contract(conn, contract_id)
+    try:
+        return generate_review(contract_id, user["name"])
+    except llm.LLMUnavailable as exc:
+        raise HTTPException(503, str(exc))
 
 
 @router.get("/contracts/{contract_id}/ai/questions")
@@ -269,3 +323,97 @@ def natural_search(body: SearchIn, user: dict = Depends(require("ai.use"))):
         except ValueError:
             result[key] = None
     return result
+
+
+# --- portfolio questions -------------------------------------------------------------
+
+PORTFOLIO_SCHEMA = llm.obj(
+    answer=llm.s(), found={"type": "boolean"},
+    contracts=llm.arr(llm.obj(id={"type": "integer"}, reason=llm.s())),
+)
+PORTFOLIO_PROMPT = """You answer questions about a company's whole contract portfolio using only the CONTRACTS,
+OBLIGATIONS and APPROVALS tables provided (one line per record, fields separated by |). Compute totals, counts and
+date comparisons exactly from the data, relative to TODAY, and show the figures you used. Totals are per currency;
+never add different currencies together. List every relevant contract in contracts (by its #id) with a short
+reason. Set found=false when the tables cannot answer the question, and say what is missing. Keep the answer brief."""
+PORTFOLIO_LIMIT = 400
+
+
+def portfolio_material(conn) -> str:
+    contracts = conn.execute(
+        f"SELECT * FROM contracts ORDER BY updated_at DESC LIMIT {PORTFOLIO_LIMIT}").fetchall()
+    reviews = {}
+    for row in conn.execute("SELECT contract_id, result FROM ai_reviews ORDER BY id"):
+        reviews[row["contract_id"]] = json.loads(row["result"])  # later rows win: latest review
+    lines = ["CONTRACTS: #id | title | vendor | status | department | owner | start | end | renewal date | "
+             "renewal notice deadline | currency | one-time | optional | tags | AI risks (high/medium/low) | top AI risk"]
+    for c in contracts:
+        review = reviews.get(c["id"]) or {}
+        risks = review.get("risks", [])
+        counts = "/".join(str(sum(r["severity"] == level for r in risks)) for level in ("high", "medium", "low")) if review else "not reviewed"
+        top = f"{risks[0]['category']}: {risks[0]['finding']}" if risks else ""
+        cells = [f"#{c['id']}", c["title"], c["vendor_name"], c["status"], c["department"], c["owner"],
+                 c["project_start_date"], c["project_end_date"], c["renewal_date"], c["renewal_notice_deadline"],
+                 c["currency"], c["one_time_amount"], c["optional_amount"], ", ".join(json.loads(c["tags"] or "[]")),
+                 counts, top[:160]]
+        lines.append(" | ".join("" if v is None else str(v).replace("\n", " ").replace("|", "/") for v in cells))
+    lines.append("\nOBLIGATIONS: contract #id | title | kind | status | due date | amount | currency | owner")
+    for o in conn.execute("SELECT * FROM obligations ORDER BY due_date"):
+        cells = [f"#{o['contract_id']}", o["title"], o["kind"], o["status"], o["due_date"], o["amount"], o["currency"], o["owner"]]
+        lines.append(" | ".join("" if v is None else str(v).replace("|", "/") for v in cells))
+    lines.append("\nAPPROVALS: contract #id | status | submitted at | current step")
+    for a in conn.execute(
+        """SELECT r.contract_id, r.status, r.submitted_at,
+                  (SELECT role FROM approval_steps s WHERE s.request_id=r.id AND s.status='Pending' LIMIT 1) step
+           FROM approval_requests r ORDER BY r.id DESC LIMIT 200"""):
+        lines.append(f"#{a['contract_id']} | {a['status']} | {a['submitted_at'][:10]} | {a['step'] or ''}")
+    return "\n".join(lines)
+
+
+def portfolio_out(conn, row) -> dict:
+    answer = json.loads(row["answer"])
+    ids = [item["id"] for item in answer.get("contracts", [])]
+    titles = {}
+    if ids:
+        marks = ",".join("?" * len(ids))
+        titles = {r["id"]: r for r in conn.execute(
+            f"SELECT id, title, vendor_name, status FROM contracts WHERE id IN ({marks})", tuple(ids))}
+    # Drop ids the model invented or that were deleted since.
+    answer["contracts"] = [{**item, "title": titles[item["id"]]["title"], "vendor_name": titles[item["id"]]["vendor_name"],
+                            "status": titles[item["id"]]["status"]}
+                           for item in answer.get("contracts", []) if item["id"] in titles]
+    return {"id": row["id"], "question": row["question"], "answer": answer, "asked_by": row["asked_by"],
+            "created_at": row["created_at"]}
+
+
+@router.get("/ai/portfolio")
+def portfolio_history(user: dict = Depends(require("ai.use"))):
+    with connection() as conn:
+        rows = conn.execute(
+            """SELECT q.*, u.name asked_by FROM ai_portfolio_questions q JOIN users u ON u.id=q.user_id
+               WHERE q.user_id=? ORDER BY q.id DESC LIMIT 30""",
+            (user["id"],),
+        ).fetchall()
+        return [portfolio_out(conn, row) for row in rows]
+
+
+@router.post("/ai/portfolio", status_code=201)
+def ask_portfolio(body: QuestionIn, user: dict = Depends(require("ai.use"))):
+    question = body.question.strip()
+    if not question:
+        raise HTTPException(422, "Ask a question.")
+    if len(question) > MAX_QUESTION:
+        raise HTTPException(422, f"Questions are limited to {MAX_QUESTION} characters.")
+    with connection() as conn:
+        material = portfolio_material(conn)
+    answer = call(PORTFOLIO_PROMPT, f"TODAY: {date.today().isoformat()}\n\n{material}\n\nQUESTION\n{question}",
+                  "portfolio_answer", PORTFOLIO_SCHEMA, effort="medium")
+    with connection() as conn:
+        cursor = conn.execute(
+            "INSERT INTO ai_portfolio_questions (user_id, question, answer, created_at) VALUES (?,?,?,?)",
+            (user["id"], question, json.dumps(answer), utc_now()),
+        )
+        row = conn.execute(
+            """SELECT q.*, u.name asked_by FROM ai_portfolio_questions q JOIN users u ON u.id=q.user_id
+               WHERE q.id=?""", (cursor.lastrowid,)).fetchone()
+        return portfolio_out(conn, row)

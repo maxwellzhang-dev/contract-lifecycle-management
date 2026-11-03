@@ -130,7 +130,8 @@ CREATE TABLE IF NOT EXISTS approval_requests (
     submitted_by INTEGER NOT NULL REFERENCES users(id),
     note TEXT,
     submitted_at TEXT NOT NULL,
-    completed_at TEXT
+    completed_at TEXT,
+    ai_review_id INTEGER
 );
 CREATE TABLE IF NOT EXISTS approval_steps (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -228,19 +229,30 @@ CREATE TABLE IF NOT EXISTS ai_questions (
     document_version INTEGER,
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS ai_portfolio_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    question TEXT NOT NULL,
+    answer TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_ai_review_contract ON ai_reviews(contract_id);
 CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id);
 """
 
 # Columns added after the first prototype release; older databases get them via ALTER TABLE.
-ADDED_CONTRACT_COLUMNS = {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'"}
+ADDED_COLUMNS = {
+    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'"},
+    "approval_requests": {"ai_review_id": "INTEGER"},
+}
 
 
 def migrate(conn):
-    existing = {row["name"] for row in conn.execute("PRAGMA table_info(contracts)")}
-    for column, kind in ADDED_CONTRACT_COLUMNS.items():
-        if column not in existing:
-            conn.execute(f"ALTER TABLE contracts ADD COLUMN {column} {kind}")
+    for table, columns in ADDED_COLUMNS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for column, kind in columns.items():
+            if column not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
     conn.execute("UPDATE contracts SET status='Quoting' WHERE status='Draft'")
     conn.execute("UPDATE contracts SET status='In Progress' WHERE status='Active'")
     # Give every uploaded document a version 1 row so version history starts complete.

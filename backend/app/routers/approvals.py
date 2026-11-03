@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..auth import APPROVER_ROLES, current_user, require
@@ -7,6 +9,7 @@ from ..workflow import (
     APPROVAL_DEFAULT_CHAIN, approval_detail, close_approval, contract_recipients, notify,
     pending_approval, users_with_roles,
 )
+from .ai import auto_review_enabled, current_review_id, review_brief, review_for_approval
 
 router = APIRouter(prefix="/api")
 
@@ -28,6 +31,19 @@ def load_request(conn, request_id: int):
     return row
 
 
+def detail(conn, request_id: int) -> dict:
+    """Approval request with its steps and a summary of the AI review approvers should read."""
+    item = approval_detail(conn, request_id)
+    item["ai_review"] = review_brief(conn, item.get("ai_review_id"))
+    state = "attached" if item["ai_review"] else "none"
+    if state == "none" and item["status"] == "Pending" and auto_review_enabled():
+        submitted = datetime.fromisoformat(item["submitted_at"])
+        if datetime.now(timezone.utc) - submitted < timedelta(minutes=10):
+            state = "running"
+    item["ai_review_state"] = state
+    return item
+
+
 def set_contract_status(conn, contract_id: int, status: str):
     conn.execute("UPDATE contracts SET status=?, updated_at=? WHERE id=?", (status, utc_now(), contract_id))
 
@@ -37,11 +53,12 @@ def contract_approvals(contract_id: int, _: dict = Depends(current_user)):
     with connection() as conn:
         ids = [r["id"] for r in conn.execute(
             "SELECT id FROM approval_requests WHERE contract_id=? ORDER BY id DESC", (contract_id,))]
-        return [approval_detail(conn, request_id) for request_id in ids]
+        return [detail(conn, request_id) for request_id in ids]
 
 
 @router.post("/contracts/{contract_id}/approvals", status_code=201)
-def submit_for_approval(contract_id: int, body: ApprovalSubmit, user: dict = Depends(require("approval.submit"))):
+def submit_for_approval(contract_id: int, body: ApprovalSubmit, background: BackgroundTasks,
+                        user: dict = Depends(require("approval.submit"))):
     roles = body.roles or APPROVAL_DEFAULT_CHAIN
     if not 1 <= len(roles) <= 5 or any(role not in APPROVER_ROLES for role in roles):
         raise HTTPException(422, f"Choose 1–5 approval steps from: {', '.join(APPROVER_ROLES)}")
@@ -56,11 +73,15 @@ def submit_for_approval(contract_id: int, body: ApprovalSubmit, user: dict = Dep
         if contract["validation_status"] != "Validated":
             raise HTTPException(409, "Confirm and validate the contract details before submitting for approval.")
         now = utc_now()
+        review_id = current_review_id(conn, contract)
         cursor = conn.execute(
-            "INSERT INTO approval_requests (contract_id, status, submitted_by, note, submitted_at) VALUES (?,?,?,?,?)",
-            (contract_id, "Pending", user["id"], (body.note or "").strip() or None, now),
+            "INSERT INTO approval_requests (contract_id, status, submitted_by, note, submitted_at, ai_review_id) VALUES (?,?,?,?,?,?)",
+            (contract_id, "Pending", user["id"], (body.note or "").strip() or None, now, review_id),
         )
         request_id = cursor.lastrowid
+        if review_id is None and auto_review_enabled():
+            # Runs after the response is sent, so submitting never waits on the model.
+            background.add_task(review_for_approval, request_id, contract_id)
         for order, role in enumerate(roles, start=1):
             conn.execute(
                 "INSERT INTO approval_steps (request_id, step_order, role, status) VALUES (?,?,?,?)",
@@ -70,7 +91,7 @@ def submit_for_approval(contract_id: int, body: ApprovalSubmit, user: dict = Dep
         add_audit(conn, "Submitted for approval", user["name"], contract_id,
                   f"Approval chain: {' → '.join(roles)}" + (f". Note: {body.note.strip()}" if body.note and body.note.strip() else ""))
         notify_step(conn, contract, roles[0], exclude=user["id"])
-        return approval_detail(conn, request_id)
+        return detail(conn, request_id)
 
 
 def notify_step(conn, contract, role: str, exclude: int):
@@ -129,7 +150,7 @@ def decide(request_id: int, body: ApprovalDecision, user: dict = Depends(current
                 notify(conn, [request["submitted_by"], *contract_recipients(conn, contract["owner"])], "approval",
                        f"Approved: {contract['title']}", "All approval steps are complete. The vendor is cleared to start.",
                        contract["id"])
-        return approval_detail(conn, request_id)
+        return detail(conn, request_id)
 
 
 @router.post("/approvals/{request_id}/withdraw")
@@ -143,7 +164,7 @@ def withdraw(request_id: int, user: dict = Depends(current_user)):
         close_approval(conn, request_id, "Withdrawn")
         set_contract_status(conn, request["contract_id"], "Quoting")
         add_audit(conn, "Approval withdrawn", user["name"], request["contract_id"], "status: 'Under Review' → 'Quoting'")
-        return approval_detail(conn, request_id)
+        return detail(conn, request_id)
 
 
 @router.get("/approvals/inbox")
@@ -156,7 +177,7 @@ def inbox(user: dict = Depends(current_user)):
             f"""SELECT s.id step_id, s.role, s.step_order, r.id request_id, r.note, r.submitted_at,
                        u.name submitted_by_name, c.id contract_id, c.title, c.vendor_name, c.currency,
                        c.one_time_amount, c.optional_amount, c.project_start_date, c.project_end_date,
-                       (SELECT COUNT(*) FROM approval_steps x WHERE x.request_id=r.id) total_steps
+                       r.ai_review_id, (SELECT COUNT(*) FROM approval_steps x WHERE x.request_id=r.id) total_steps
                 FROM approval_steps s
                 JOIN approval_requests r ON r.id=s.request_id
                 JOIN contracts c ON c.id=r.contract_id
@@ -167,4 +188,8 @@ def inbox(user: dict = Depends(current_user)):
                 ORDER BY r.submitted_at""",
             (*roles, user["id"], user["id"]),
         ).fetchall()
-    return [dict(row) for row in rows]
+        items = []
+        for row in rows:
+            brief = review_brief(conn, row["ai_review_id"])
+            items.append({**dict(row), "ai_risk_counts": brief["risk_counts"] if brief else None})
+    return items

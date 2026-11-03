@@ -41,6 +41,8 @@ def fake_llm(monkeypatch):
         "contract_answer": {"answer": "30 days' notice.", "found": True, "citations": [{"quote": "thirty (30) days", "note": None}]},
         "version_comparison": {"summary": "Fee increased.", "changes": [
             {"topic": "Fees", "before": "SGD 10,000", "after": "SGD 12,000", "impact": "unfavourable", "note": "20% higher"}]},
+        "portfolio_answer": {"answer": "One contract ends this year.", "found": True,
+                             "contracts": [{"id": 1, "reason": "Ends 2026-12-31"}, {"id": 999, "reason": "invented"}]},
         "contract_filters": {"search": None, "status": "In Progress", "vendor": "acme cloud", "department": None,
                              "owner": "Nobody Real", "tag": None, "currency": None, "min_value": 100000, "max_value": None,
                              "end_from": "2027-01-01", "end_to": "not a date", "explanation": "Acme contracts"},
@@ -70,7 +72,7 @@ def test_schemas_are_valid_for_strict_mode():
                 walk(child)
         if "items" in schema:
             walk(schema["items"])
-    for schema in (ai.REVIEW_SCHEMA, ai.QUESTION_SCHEMA, ai.COMPARE_SCHEMA, ai.SEARCH_SCHEMA):
+    for schema in (ai.REVIEW_SCHEMA, ai.QUESTION_SCHEMA, ai.COMPARE_SCHEMA, ai.SEARCH_SCHEMA, ai.PORTFOLIO_SCHEMA):
         walk(schema)
 
 
@@ -177,3 +179,81 @@ def test_real_call_sends_guardrail_and_redacts_key(monkeypatch):
     with pytest.raises(llm.LLMUnavailable) as error:
         llm.structured("Do the task.", "fail", "x", {"type": "object"})
     assert "secret-key" not in str(error.value) and "[redacted]" in str(error.value)
+
+
+def test_portfolio_question_sees_all_contracts_and_drops_unknown_ids(client, users, fake_llm, contract):
+    client.post(f"/api/contracts/{contract['id']}/obligations", headers=users["finance"],
+                json={"title": "Pay deposit", "kind": "Payment", "due_date": "2026-03-01", "amount": 500})
+    response = client.post("/api/ai/portfolio", headers=users["finance"], json={"question": "What ends this year?"})
+    assert response.status_code == 201, response.text
+    item = response.json()
+    assert [c["id"] for c in item["answer"]["contracts"]] == [contract["id"]]
+    assert item["answer"]["contracts"][0]["title"] == "Cloud Hosting Agreement"
+    sent = fake_llm[-1]["text"]
+    assert f"#{contract['id']} | Cloud Hosting Agreement | Acme Cloud | Quoting" in sent
+    assert "Pay deposit" in sent and "TODAY:" in sent
+    history = client.get("/api/ai/portfolio", headers=users["finance"]).json()
+    assert [h["id"] for h in history] == [item["id"]]
+    assert client.get("/api/ai/portfolio", headers=users["legal"]).json() == []  # history is per user
+    assert client.post("/api/ai/portfolio", headers=users["viewer"], json={"question": "x"}).status_code == 403
+    assert client.post("/api/ai/portfolio", headers=users["finance"], json={"question": " "}).status_code == 422
+
+
+def configure_ai(monkeypatch):
+    monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example.invalid")
+    monkeypatch.setenv("AZURE_OPENAI_API_KEY", "k")
+    monkeypatch.setenv("AZURE_OPENAI_DEPLOYMENT", "d")
+
+
+def test_submitting_for_approval_runs_ai_review_for_approvers(client, users, fake_llm, contract, monkeypatch):
+    from .conftest import validated
+    configure_ai(monkeypatch)
+    validated(client, users, contract)
+    response = client.post(f"/api/contracts/{contract['id']}/approvals", headers=users["procurement"], json={})
+    assert response.status_code == 201, response.text
+    assert [c["name"] for c in fake_llm] == ["contract_review"]  # ran as a background task
+    request = client.get(f"/api/contracts/{contract['id']}/approvals", headers=users["legal"]).json()[0]
+    assert request["ai_review_state"] == "attached"
+    assert request["ai_review"]["risk_counts"] == {"high": 1, "medium": 0, "low": 1}
+    assert request["ai_review"]["top_risks"][0]["severity"] == "high"
+    inbox = client.get("/api/approvals/inbox", headers=users["legal"]).json()
+    assert inbox[0]["ai_risk_counts"]["high"] == 1
+    audit = client.get(f"/api/audit?contract_id={contract['id']}", headers=users["admin"]).json()
+    assert any(a["action"] == "AI review generated" and a["actor"] == "Clause AI" for a in audit)
+
+
+def test_existing_review_is_reused_on_submit(client, users, fake_llm, contract, monkeypatch):
+    from .conftest import validated
+    configure_ai(monkeypatch)
+    validated(client, users, contract)
+    review = client.post(f"/api/contracts/{contract['id']}/ai/review", headers=users["legal"]).json()
+    client.post(f"/api/contracts/{contract['id']}/approvals", headers=users["procurement"], json={})
+    assert len(fake_llm) == 1
+    request = client.get(f"/api/contracts/{contract['id']}/approvals", headers=users["legal"]).json()[0]
+    assert request["ai_review"]["id"] == review["id"]
+
+
+def test_ai_failure_never_blocks_approval(client, users, contract, monkeypatch):
+    from .conftest import validated
+    configure_ai(monkeypatch)
+
+    def broken(*args, **kwargs):
+        raise llm.LLMUnavailable("Azure OpenAI returned 500")
+    monkeypatch.setattr(llm, "structured", broken)
+    validated(client, users, contract)
+    assert client.post(f"/api/contracts/{contract['id']}/approvals", headers=users["procurement"], json={}).status_code == 201
+    request = client.get(f"/api/contracts/{contract['id']}/approvals", headers=users["legal"]).json()[0]
+    assert request["ai_review"] is None
+    audit = client.get(f"/api/audit?contract_id={contract['id']}", headers=users["admin"]).json()
+    assert any(a["action"] == "AI review failed" for a in audit)
+
+
+def test_auto_review_can_be_turned_off(client, users, fake_llm, contract, monkeypatch):
+    from .conftest import validated
+    configure_ai(monkeypatch)
+    monkeypatch.setenv("AI_REVIEW_ON_SUBMIT", "0")
+    validated(client, users, contract)
+    client.post(f"/api/contracts/{contract['id']}/approvals", headers=users["procurement"], json={})
+    assert fake_llm == []
+    request = client.get(f"/api/contracts/{contract['id']}/approvals", headers=users["legal"]).json()[0]
+    assert request["ai_review_state"] == "none"
