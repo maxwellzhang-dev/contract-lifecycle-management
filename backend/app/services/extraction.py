@@ -74,6 +74,11 @@ def extract_text_and_images(path: Path):
         images.append((mimetypes.guess_type(path.name)[0] or "image/jpeg", path.read_bytes()))
     else:
         raise ValueError("Supported formats are PDF, DOCX, PNG, JPG and WEBP.")
+    if len(text.strip()) < 200 and suffix != ".docx":
+        from .ocr import cached_text
+        ocr_text = cached_text(path)  # scanned document read by Document Intelligence
+        if ocr_text and ocr_text.strip():
+            text = ocr_text
     return text[:180000], images
 
 

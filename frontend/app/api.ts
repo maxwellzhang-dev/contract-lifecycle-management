@@ -448,6 +448,8 @@ export const api = {
   directory: () => request<DirectoryEntry[]>("/api/users/directory"),
   users: () => request<User[]>("/api/users"),
   jobs: (status = "") => request<{ counts: Partial<Record<Job["status"], number>>; items: Job[]; workers: number; mode: string }>(`/api/jobs${status ? `?status=${status}` : ""}`),
+  ocrStatus: () => request<{ configured: boolean; scanned_without_text: number }>("/api/ocr/status"),
+  ocrBackfill: () => json<{ queued: number }>("/api/ocr/backfill", "POST"),
   retryJob: (id: number) => json<Job>(`/api/jobs/${id}/retry`, "POST"),
   members: (id: number) => request<Member[]>(`/api/contracts/${id}/members`),
   addMember: (id: number, user_id: number) => json<Member[]>(`/api/contracts/${id}/members`, "POST", { user_id }),

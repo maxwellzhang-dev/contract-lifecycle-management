@@ -14,7 +14,7 @@ from ..access import visibility_sql
 from ..auth import current_user, require
 from ..database import add_audit, connection, rows_to_dicts, tag_match_sql, utc_now
 from .. import jobs
-from ..services import rag
+from ..services import ocr, rag
 from ..services.extraction import FIELDS, extract_contract
 from ..storage import save_upload, stored_file
 from ..workflow import (
@@ -307,8 +307,14 @@ def upload_contract(
             (contract_id, 1, file.filename, file.content_type, str(destination), size, user["name"], now, "Original upload"),
         )
         add_audit(conn, "Contract uploaded", user["name"], contract_id, f"Uploaded {file.filename}")
-        jobs.enqueue(conn, "extract", {"contract_id": contract_id, "placeholder_title": title})
-        rag.queue(conn, contract_id)
+        if ocr.configured() and ocr.needs_ocr(destination):
+            # Scanned: read the pages first; the OCR job then queues extraction and indexing.
+            conn.execute("UPDATE contracts SET extraction_note=? WHERE id=?", ("Reading scanned pages (OCR) is queued", contract_id))
+            jobs.enqueue(conn, "ocr", {"contract_id": contract_id, "file_path": str(destination), "then_extract": True,
+                                       "placeholder_title": title})
+        else:
+            jobs.enqueue(conn, "extract", {"contract_id": contract_id, "placeholder_title": title})
+            rag.queue(conn, contract_id)
     with connection() as conn:  # in inline mode the extraction has already run
         return contract_response(conn, contract_id)
 
@@ -366,6 +372,42 @@ def extraction_failed(payload: dict, error: str):
 
 
 jobs.handler("extract", max_attempts=EXTRACTION_ATTEMPTS, on_failure=extraction_failed)(extraction_job)
+
+
+def ocr_job(payload: dict, attempt: int):
+    contract_id = payload.get("contract_id")
+    path = stored_file(payload["file_path"])
+    if payload.get("then_extract"):
+        with connection() as conn:
+            conn.execute("UPDATE contracts SET extraction_status='Running', extraction_note=? WHERE id=?",
+                         (f"Reading scanned pages (OCR, attempt {attempt})", contract_id))
+    text = ocr.run(path)
+    with connection() as conn:
+        exists = conn.execute("SELECT 1 FROM contracts WHERE id=?", (contract_id,)).fetchone()
+        if exists:
+            add_audit(conn, "OCR completed", "Document Intelligence", contract_id,
+                      f"{len(text):,} characters recognised in {path.name.rsplit('.', 1)[-1].upper()} document")
+        ocr_done(conn, payload)
+
+
+def ocr_done(conn, payload: dict):
+    """After OCR (or after giving up on it), carry on with extraction and indexing."""
+    contract_id = payload.get("contract_id")
+    if not conn.execute("SELECT 1 FROM contracts WHERE id=?", (contract_id,)).fetchone():
+        return
+    if payload.get("then_extract"):
+        conn.execute("UPDATE contracts SET extraction_status='Queued' WHERE id=?", (contract_id,))
+        jobs.enqueue(conn, "extract", {"contract_id": contract_id, "placeholder_title": payload.get("placeholder_title")})
+    rag.queue(conn, contract_id)
+
+
+def ocr_failed(payload: dict, error: str):
+    with connection() as conn:
+        add_audit(conn, "OCR failed", "Document Intelligence", payload.get("contract_id"), error[:300])
+        ocr_done(conn, payload)  # extraction still runs, using page images
+
+
+jobs.handler("ocr", max_attempts=4, on_failure=ocr_failed)(ocr_job)
 
 
 def check_dates(values: dict):
@@ -524,7 +566,10 @@ def upload_version(
         )
         add_audit(conn, "New document version", user["name"], contract_id,
                   f"Version {version}: {file.filename}" + (f" — {note.strip()}" if note.strip() else ""))
-        rag.queue(conn, contract_id)
+        if ocr.configured() and ocr.needs_ocr(destination):
+            jobs.enqueue(conn, "ocr", {"contract_id": contract_id, "file_path": str(destination), "then_extract": False})
+        else:
+            rag.queue(conn, contract_id)
         return contract_response(conn, contract_id)
 
 

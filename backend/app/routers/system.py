@@ -46,3 +46,39 @@ def retry_job(job_id: int, user: dict = Depends(require("user.manage"))):
                   f"{LABELS.get(row['kind'], row['kind'])} job #{job_id}")
         after_commit(conn, (lambda: jobs.run_job(job_id)) if jobs.mode() == "inline" else jobs.worker_pool.wake)
         return job_out(conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone())
+
+
+# --- OCR ------------------------------------------------------------------------------
+
+def scanned_without_text(conn) -> list[tuple[int, str]]:
+    """(contract id, file path) of current documents that need OCR and have none yet."""
+    from pathlib import Path
+
+    from ..services import ocr
+    found = []
+    for row in conn.execute("SELECT id, file_path FROM contracts WHERE file_path IS NOT NULL"):
+        path = Path(row["file_path"])
+        if path.exists() and ocr.cached_text(path) is None and ocr.needs_ocr(path):
+            found.append((row["id"], row["file_path"]))
+    return found
+
+
+@router.get("/ocr/status")
+def ocr_status(_: dict = Depends(require("user.manage"))):
+    from ..services import ocr
+    with connection() as conn:
+        waiting = len(scanned_without_text(conn)) if ocr.configured() else 0
+    return {"configured": ocr.configured(), "scanned_without_text": waiting}
+
+
+@router.post("/ocr/backfill")
+def ocr_backfill(user: dict = Depends(require("user.manage"))):
+    from ..services import ocr
+    if not ocr.configured():
+        raise HTTPException(503, "OCR needs AZURE_DOCINTEL_ENDPOINT and AZURE_DOCINTEL_KEY.")
+    with connection() as conn:
+        documents = scanned_without_text(conn)
+        for contract_id, file_path in documents:
+            jobs.enqueue(conn, "ocr", {"contract_id": contract_id, "file_path": file_path, "then_extract": False})
+        add_audit(conn, "OCR backfill started", user["name"], details=f"{len(documents)} scanned document(s) queued")
+    return {"queued": len(documents)}

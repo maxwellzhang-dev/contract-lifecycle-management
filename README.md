@@ -80,7 +80,7 @@ The **AI assistant** page can also answer from the *text* of every contract docu
 Notes:
 
 - Indexing calls the model several times per chunk, so it costs noticeably more tokens than the other AI features. `RAG_LLM_DEPLOYMENT` can point indexing and answers at a cheaper deployment than `AZURE_OPENAI_DEPLOYMENT`.
-- Scanned documents without a text layer are not indexed yet. They are listed on the page with the reason.
+- Scanned documents are indexed once OCR has read them (see Background jobs → OCR). Without OCR they are listed on the page as unreadable.
 - The index is stored in `RAG_DIR` (default `backend/data/rag`). For several API replicas, set `RAG_STORAGE=postgres` to use LightRAG's PostgreSQL storage. This needs the `pgvector` and Apache AGE extensions and LightRAG's `POSTGRES_*` variables, and has not been tested with Clause yet.
 - tiktoken downloads its tokenizer file on first use. In an environment without internet access, set `TIKTOKEN_CACHE_DIR` to a folder that already contains it (the Docker image does this at build time).
 - Changing the embedding model or dimension needs a fresh index: empty `RAG_DIR`, then rebuild.
@@ -136,6 +136,16 @@ Each job is retried with growing pauses (30 s, 1 min, 2 min, …). After its las
 | `JOB_POLL_SECONDS` | `2` | How often idle workers look for due jobs (new jobs wake them at once) |
 
 The LightRAG document index keeps its own queue (see above).
+
+### OCR for scanned documents
+
+Scanned PDFs and images have no text layer, so the AI only saw images of their first pages, and review, questions, comparison and document search had little to work with. With [Azure AI Document Intelligence](https://learn.microsoft.com/azure/ai-services/document-intelligence/) configured, each scanned upload or new version is read first (the `prebuilt-read` model, all pages). The text is kept next to the file and used everywhere the document's text is needed. Extraction and indexing run after OCR. If OCR fails, extraction still runs from page images.
+
+1. Create a Document Intelligence resource in Azure.
+2. Set `AZURE_DOCINTEL_ENDPOINT` and `AZURE_DOCINTEL_KEY` (optionally `AZURE_DOCINTEL_MODEL`, default `prebuilt-read`) and restart the API.
+3. To read documents uploaded before OCR was on, click **Read them now** under **Users & roles → Background jobs**.
+
+During OCR, scanned documents are sent to that Document Intelligence resource.
 
 ## Who can see which contracts
 
