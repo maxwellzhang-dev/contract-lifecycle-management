@@ -81,6 +81,27 @@ Approved contracts (`Cleared to Start` or `In Progress`) with a document can be 
 
 This is a simple electronic signature with an audit trail, suitable for most commercial agreements. Contracts that need a qualified or advanced electronic signature (for example under eIDAS) or a certificate-based digital signature need a dedicated signing provider.
 
+## Single sign-on (Microsoft Entra ID)
+
+Clause supports sign-in with Microsoft Entra ID (or any OpenID Connect provider) next to, or instead of, passwords. It uses the authorization code flow with PKCE, and checks the ID token's signature, issuer, audience, expiry and nonce.
+
+1. In the Entra admin center, go to **App registrations → New registration**. Use a single-tenant app with the **Web** redirect URI `https://<your-clause-address>/backend-api/api/auth/sso/callback` (locally: `http://localhost:3000/backend-api/api/auth/sso/callback`).
+2. Under **Certificates & secrets**, create a client secret.
+3. Optional: under **App roles**, create roles with the values `Clause.Admin`, `Clause.Legal`, `Clause.Procurement`, `Clause.Finance` and `Clause.Viewer`, and assign users or groups in **Enterprise applications**. A user's Clause role is then set from their app role on every sign-in (the highest one wins). Without app roles, roles are managed on the Users page.
+4. Set these values in `.env` and restart the API:
+
+| Variable | Meaning |
+| --- | --- |
+| `ENTRA_TENANT_ID` | Directory (tenant) ID. Or set `SSO_ISSUER` for another OpenID Connect provider. |
+| `SSO_CLIENT_ID`, `SSO_CLIENT_SECRET` | Application (client) ID and the client secret |
+| `PUBLIC_APP_URL` | Clause's public address; the redirect URI is derived from it unless `SSO_REDIRECT_URI` is set |
+| `SSO_AUTO_PROVISION` | `1` (default) creates an account on first sign-in; `0` only lets existing users in |
+| `SSO_DEFAULT_ROLE` | Role for new accounts without an app role (default `viewer`) |
+| `SSO_ALLOWED_DOMAINS` | Optional comma-separated email domains that may sign in |
+| `PASSWORD_LOGIN` | `0` hides password sign-in once SSO works |
+
+Users are matched by their Entra object ID, then by email, so existing accounts keep their history. Deactivated users cannot sign in, and a role change from Entra ends the user's other sessions.
+
 ## Roles
 
 | Role | Can do |

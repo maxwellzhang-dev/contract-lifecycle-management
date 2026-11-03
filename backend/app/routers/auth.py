@@ -6,6 +6,7 @@ from ..auth import (
     set_session_cookie, validate_password, validate_role, verify_password,
 )
 from ..database import add_audit, connection, utc_now
+from . import sso
 
 router = APIRouter(prefix="/api")
 
@@ -15,6 +16,8 @@ _DUMMY_HASH = hash_password("timing-equaliser")
 
 @router.post("/auth/login")
 def login(body: LoginRequest, response: Response):
+    if sso.enabled() and not sso.password_login_enabled():
+        raise HTTPException(403, "Password sign-in is turned off. Use single sign-on.")
     with connection() as conn:
         row = conn.execute("SELECT * FROM users WHERE email=?", (body.email.strip(),)).fetchone()
     valid = verify_password(body.password, row["password_hash"] if row else _DUMMY_HASH)

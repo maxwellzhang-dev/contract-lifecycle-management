@@ -338,12 +338,14 @@ function json<T>(path: string, method: string, body?: unknown): Promise<T> {
 
 export const fileUrl = (contractId: number, version?: number) =>
   version ? `${API_BASE}/api/contracts/${contractId}/versions/${version}/file` : `${API_BASE}/api/contracts/${contractId}/file`;
+export const ssoLoginUrl = `${API_BASE}/api/auth/sso/login`;
 export const signedCopyUrl = (requestId: number) => `${API_BASE}/api/signatures/${requestId}/signed-copy`;
 export const signingDocumentUrl = (token: string) => `${API_BASE}/api/sign/${encodeURIComponent(token)}/document`;
 export const previewUrl = (contractId: number, version?: number) =>
   version ? `${API_BASE}/api/contracts/${contractId}/versions/${version}/preview` : `${API_BASE}/api/contracts/${contractId}/preview`;
 
 export const api = {
+  authConfig: () => request<{ sso_enabled: boolean; sso_label: string; password_login: boolean }>("/api/auth/config"),
   login: (email: string, password: string) => json<{ user: User }>("/api/auth/login", "POST", { email, password }),
   logout: () => json<{ signed_out: boolean }>("/api/auth/logout", "POST"),
   me: () => request<User>("/api/auth/me"),

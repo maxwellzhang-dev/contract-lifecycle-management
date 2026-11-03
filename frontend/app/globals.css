@@ -701,3 +701,9 @@ nav .nav-item:nth-child(12) { --sec: var(--hue-indigo); --sec-bg: var(--hue-indi
 .sign-done h2,.sign-done p{color:var(--ink,#172033)}
 @media (max-width:900px){.sign-layout{grid-template-columns:1fr}.sign-doc{height:60vh}.sign-page{padding:16px}}
 .wf-panel .secondary-button,.wf-panel .primary-button,.wf-panel .danger-button{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none}
+
+/* Single sign-on */
+.sso-button{display:flex;align-items:center;justify-content:center;gap:10px;border:1px solid #c8ccd6;background:#fff;color:#1f2430;border-radius:8px;padding:11px 16px;font-weight:700;font-size:15px;text-decoration:none}
+.sso-button:hover{background:#f6f7fa}
+.login-divider{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px}
+.login-divider::before,.login-divider::after{content:"";flex:1;height:1px;background:var(--line)}

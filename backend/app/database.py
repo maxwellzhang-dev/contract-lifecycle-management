@@ -116,6 +116,13 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    sso_subject TEXT
+);
+CREATE TABLE IF NOT EXISTS sso_states (
+    state_hash TEXT PRIMARY KEY,
+    nonce TEXT NOT NULL,
+    code_verifier TEXT NOT NULL,
     created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -282,6 +289,7 @@ CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id)
 ADDED_COLUMNS = {
     "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT"},
     "approval_requests": {"ai_review_id": "INTEGER"},
+    "users": {"sso_subject": "TEXT"},
 }
 
 

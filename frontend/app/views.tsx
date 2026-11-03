@@ -3,18 +3,37 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Bell, CalendarClock, CheckCircle2, ClipboardCheck, KeyRound, LogOut, UserPlus } from "lucide-react";
 import {
-  api, can, obligationStatuses, roles,
+  api, can, obligationStatuses, roles, ssoLoginUrl,
   type InboxItem, type Notification, type Obligation, type User,
 } from "./api";
 import { EmptyState, SectionHeader, Status, amountLabel, dateLabel, dateTimeLabel, errorText, initials, roleLabel } from "./shared";
 
 // --- sign in -------------------------------------------------------------------------
 
+type AuthConfig = { sso_enabled: boolean; sso_label: string; password_login: boolean };
+
+function MicrosoftMark() {
+  return <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>;
+}
+
 export function LoginScreen({ onSignedIn }: { onSignedIn: (user: User) => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [config, setConfig] = useState<AuthConfig>({ sso_enabled: false, sso_label: "", password_login: true });
+  useEffect(() => {
+    let cancelled = false;
+    api.authConfig().then(c => { if (!cancelled) setConfig(c); }).catch(() => undefined);
+    // A failed single sign-on comes back as ?sso_error=…; show it once and tidy the address bar.
+    const params = new URLSearchParams(window.location.search);
+    const ssoError = params.get("sso_error");
+    if (ssoError) {
+      queueMicrotask(() => { if (!cancelled) setError(ssoError); });
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+    return () => { cancelled = true; };
+  }, []);
   async function submit(event: FormEvent) {
     event.preventDefault(); setBusy(true); setError("");
     try { onSignedIn((await api.login(email, password)).user); }
@@ -24,11 +43,15 @@ export function LoginScreen({ onSignedIn }: { onSignedIn: (user: User) => void }
     <form className="login-card" onSubmit={submit}>
       <div className="brand"><div className="brand-mark" aria-hidden="true"><span /><span /><span /></div><div><strong>Clause</strong><small>Contract intelligence</small></div></div>
       <h1>Sign in</h1>
-      <label className="wf-field">Work email<input type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} /></label>
-      <label className="wf-field">Password<input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} /></label>
+      {config.sso_enabled && <a className="sso-button" href={ssoLoginUrl}><MicrosoftMark />{config.sso_label}</a>}
+      {config.sso_enabled && config.password_login && <div className="login-divider"><span>or use a password</span></div>}
+      {config.password_login && <>
+        <label className="wf-field">Work email<input type="email" autoComplete="username" required value={email} onChange={e => setEmail(e.target.value)} /></label>
+        <label className="wf-field">Password<input type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} /></label>
+      </>}
       {error && <p className="form-error">{error}</p>}
-      <button className="primary-button" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
-      <p className="wf-hint">Local demo accounts are listed in the README.</p>
+      {config.password_login && <button className="primary-button" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>}
+      {config.password_login && !config.sso_enabled && <p className="wf-hint">Local demo accounts are listed in the README.</p>}
     </form>
   </main>;
 }
