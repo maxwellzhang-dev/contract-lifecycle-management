@@ -12,7 +12,7 @@ load_dotenv(PROJECT_ROOT / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from .database import connection, init_db
+from .database import connection, init_db, is_postgres
 from .routers import ai, approvals, auth, comments, contracts, insights, obligations, signatures, sso, templates
 from .workflow import run_reminders
 
@@ -67,7 +67,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "database": "sqlite", "model": os.getenv("AZURE_OPENAI_DEPLOYMENT", "not configured")}
+    return {"status": "ok", "database": "postgresql" if is_postgres() else "sqlite", "model": os.getenv("AZURE_OPENAI_DEPLOYMENT", "not configured")}
 
 
 for module in (auth, sso, templates, contracts, approvals, obligations, comments, insights, ai, signatures):

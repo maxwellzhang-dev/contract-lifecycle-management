@@ -14,22 +14,49 @@ def db_path() -> Path:
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
+def database_url() -> str:
+    """A postgres:// or postgresql:// URL switches the app to PostgreSQL; otherwise SQLite is used."""
+    return os.getenv("DATABASE_URL", "").strip()
+
+
+def is_postgres() -> bool:
+    return database_url().startswith(("postgres://", "postgresql://"))
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 @contextmanager
 def connection():
-    path = db_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    if is_postgres():
+        from .pg import connect
+        conn = connect(database_url())
+    else:
+        path = db_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
     try:
         yield conn
         conn.commit()
     finally:
         conn.close()
+
+
+def tag_match_sql(column: str = "contracts.tags") -> str:
+    """SQL that is true when the JSON tag list in `column` contains the parameter (any case)."""
+    if is_postgres():
+        return f"EXISTS (SELECT 1 FROM json_array_elements_text({column}::json) t(value) WHERE lower(t.value) = lower(?))"
+    return f"EXISTS (SELECT 1 FROM json_each({column}) WHERE lower(json_each.value) = lower(?))"
+
+
+def table_columns(conn, table: str) -> set[str]:
+    if not isinstance(conn, sqlite3.Connection):
+        return {r[0] for r in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name=?", (table,))}
+    return {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
 
 
 JSON_LIST_COLUMNS = ("missing_fields", "low_confidence_fields", "tags")
@@ -295,7 +322,7 @@ ADDED_COLUMNS = {
 
 def migrate(conn):
     for table, columns in ADDED_COLUMNS.items():
-        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        existing = table_columns(conn, table)
         for column, kind in columns.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
@@ -316,7 +343,11 @@ def init_db():
     from .routers.templates import seed_templates
 
     with connection() as conn:
-        conn.executescript(SCHEMA)
+        if is_postgres():
+            from .pg import schema_sql
+            conn.executescript(schema_sql(SCHEMA))
+        else:
+            conn.executescript(SCHEMA)
         migrate(conn)
         seed_users(conn)
         seed_templates(conn)

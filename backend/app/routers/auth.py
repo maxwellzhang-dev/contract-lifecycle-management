@@ -19,7 +19,7 @@ def login(body: LoginRequest, response: Response):
     if sso.enabled() and not sso.password_login_enabled():
         raise HTTPException(403, "Password sign-in is turned off. Use single sign-on.")
     with connection() as conn:
-        row = conn.execute("SELECT * FROM users WHERE email=?", (body.email.strip(),)).fetchone()
+        row = conn.execute("SELECT * FROM users WHERE lower(email)=lower(?)", (body.email.strip(),)).fetchone()
     valid = verify_password(body.password, row["password_hash"] if row else _DUMMY_HASH)
     if not row or not valid or not row["active"]:
         raise HTTPException(401, "Email or password is incorrect.")
@@ -78,7 +78,7 @@ def create_user(body: UserCreate, admin: dict = Depends(require("user.manage")))
     if "@" not in body.email or not body.name.strip():
         raise HTTPException(422, "A name and a valid email are required.")
     with connection() as conn:
-        if conn.execute("SELECT 1 FROM users WHERE email=?", (body.email.strip(),)).fetchone():
+        if conn.execute("SELECT 1 FROM users WHERE lower(email)=lower(?)", (body.email.strip(),)).fetchone():
             raise HTTPException(409, "A user with this email already exists.")
         cursor = conn.execute(
             "INSERT INTO users (email, name, role, password_hash, active, created_at) VALUES (?,?,?,?,1,?)",

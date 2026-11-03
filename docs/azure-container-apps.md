@@ -156,7 +156,7 @@ az containerapp update --name "$BACKEND_APP" --resource-group "$RESOURCE_GROUP" 
     SSO_CLIENT_SECRET=secretref:sso-client-secret PASSWORD_LOGIN=0
 ```
 
-Set `CLAUSE_SEED_PASSWORD` to a strong value before the first start. It becomes the initial password of the seeded accounts (see the README), so sign in and change each one, or deactivate the ones you do not need. `COOKIE_SECURE=1` restricts the session cookie to HTTPS. Keep `--max-replicas 1`: SQLite and the in-process reminder job both assume a single API replica.
+Set `CLAUSE_SEED_PASSWORD` to a strong value before the first start. It becomes the initial password of the seeded accounts (see the README), so sign in and change each one, or deactivate the ones you do not need. `COOKIE_SECURE=1` restricts the session cookie to HTTPS. Keep `--max-replicas 1` while you use SQLite. With PostgreSQL (`DATABASE_URL`, see the README) you can run several replicas: reminders are de-duplicated in the database, so each is sent once. Mount the same Azure Files share for `UPLOAD_DIR` on every replica.
 
 The backend is internal-only. Other Container Apps in the same environment can call it by app name:
 

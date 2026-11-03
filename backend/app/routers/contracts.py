@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..auth import current_user, require
-from ..database import add_audit, connection, rows_to_dicts, utc_now
+from ..database import add_audit, connection, rows_to_dicts, tag_match_sql, utc_now
 from ..services.extraction import FIELDS, extract_contract
 from ..storage import save_upload, stored_file
 from ..workflow import (
@@ -169,7 +169,7 @@ def query_contracts(search="", status="", vendor="", department="", limit=100, o
             clauses.append(f"{field} = ?")
             params.append(value)
     if tag:
-        clauses.append("EXISTS (SELECT 1 FROM json_each(contracts.tags) WHERE lower(json_each.value) = lower(?))")
+        clauses.append(tag_match_sql())
         params.append(tag)
     if min_value is not None:
         clauses.append(f"{TOTAL_VALUE} >= ?")

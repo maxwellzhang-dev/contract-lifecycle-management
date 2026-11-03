@@ -147,8 +147,6 @@ Contract files and structured data are stored locally. During AI extraction, doc
 
 ```bash
 # Run these commands from the repository root.
-cd others/contract-lifecycle-prototype
-
 python3 -m venv .venv
 .venv/bin/pip install -r backend/requirements.txt
 
@@ -168,6 +166,13 @@ Configure the Azure OpenAI values in the newly created `.env` file. Do not commi
 .venv/bin/python -m pytest backend/tests
 ```
 
+To run the same tests against PostgreSQL, point `TEST_DATABASE_URL` at an empty, disposable database. The tests drop and recreate its `public` schema:
+
+```bash
+docker compose -f docker-compose.postgres.yml up -d
+TEST_DATABASE_URL=postgresql://clause:clause@127.0.0.1:5432/clause .venv/bin/python -m pytest backend/tests
+```
+
 ### Run
 
 ```bash
@@ -183,14 +188,34 @@ The local services are available at:
 
 Use `Ctrl+C` to stop both services.
 
+## Database
+
+Clause uses SQLite by default (`DATABASE_PATH`). For more than one user at a time, several API replicas or managed backups, use PostgreSQL 14 or later. Set `DATABASE_URL`, and the tables are created on start:
+
+```bash
+DATABASE_URL=postgresql://clause:clause@127.0.0.1:5432/clause
+```
+
+`docker-compose.postgres.yml` starts a local PostgreSQL with those credentials. In Azure, use Azure Database for PostgreSQL (Flexible Server) and add `?sslmode=require` to the URL.
+
+To move an existing SQLite database into an empty PostgreSQL database, keeping all ids and history:
+
+```bash
+.venv/bin/python -m backend.app.copy_to_postgres --sqlite backend/data/contracts.db \
+  --postgres postgresql://clause:clause@127.0.0.1:5432/clause
+```
+
+Uploaded files are not in the database. Keep `UPLOAD_DIR` pointing at the same folder, or a shared file share when you run several replicas. Sign-in sessions are not copied, so everyone signs in again.
+
 ## Deployment
 
 Azure Container Apps deployment guidance is available in [docs/azure-container-apps.md](docs/azure-container-apps.md).
 
 ## Prototype scope
 
-- Authentication uses local accounts stored in SQLite. Microsoft Entra ID (SSO) is not yet integrated.
-- SQLite is appropriate for a single-machine prototype. A multi-user production deployment should use PostgreSQL or another managed database.
+- Accounts can sign in with a password or with Microsoft Entra ID. There is no multi-factor authentication for password accounts; use Entra ID (with its MFA policies) and `PASSWORD_LOGIN=0` in production.
+- SQLite suits a single machine. Use PostgreSQL (`DATABASE_URL`) for production and for more than one API replica.
+- E-signature is a simple electronic signature with an audit trail and certificate, not a qualified or certificate-based digital signature.
 - AI extraction runs synchronously during upload. Production use should move extraction to a reliable background job queue.
-- Reminders run inside the API process. With more than one API replica, run them from a single scheduled job instead (`REMINDERS_ENABLED=0` on the replicas).
+- Reminders run inside the API process. They are de-duplicated in the database, so several replicas on PostgreSQL do not send duplicates; you can still run them from one scheduled job instead (`REMINDERS_ENABLED=0` on the replicas).
 - DOCX preview renders readable paragraphs and tables; it is not a pixel-perfect representation of Word page layout.

@@ -14,6 +14,16 @@ def app_env(tmp_path, monkeypatch):
     monkeypatch.setenv("SEED_DEMO_DATA", "0")
     monkeypatch.setenv("CLAUSE_SEED_PASSWORD", PASSWORD)
     monkeypatch.delenv("SMTP_HOST", raising=False)
+    # Run the whole suite against PostgreSQL with TEST_DATABASE_URL=postgresql://… (an empty, disposable database).
+    test_url = os.getenv("TEST_DATABASE_URL", "")
+    if test_url:
+        import psycopg
+        with psycopg.connect(test_url, autocommit=True) as conn:
+            conn.execute("DROP SCHEMA public CASCADE")
+            conn.execute("CREATE SCHEMA public")
+        monkeypatch.setenv("DATABASE_URL", test_url)
+    else:
+        monkeypatch.delenv("DATABASE_URL", raising=False)
 
     from backend.app.routers import contracts
 

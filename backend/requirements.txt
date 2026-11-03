@@ -9,3 +9,4 @@ Pillow>=11,<13
 
 openpyxl>=3.1,<4
 pyjwt[crypto]>=2.9,<3
+psycopg[binary]>=3.2,<4
