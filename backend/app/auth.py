@@ -90,6 +90,8 @@ def public_user(row) -> dict:
         "name": row["name"],
         "role": row["role"],
         "active": bool(row["active"]),
+        "department": row["department"],
+        "access_scope": "all" if row["role"] == "admin" else (row["access_scope"] or "all"),
         "permissions": permissions_for(row["role"]),
     }
 
@@ -164,6 +166,8 @@ class UserCreate(BaseModel):
     name: str
     role: str
     password: str
+    department: str | None = None
+    access_scope: str = "all"
 
 
 class UserUpdate(BaseModel):
@@ -171,6 +175,8 @@ class UserUpdate(BaseModel):
     role: str | None = None
     active: bool | None = None
     password: str | None = None
+    department: str | None = None
+    access_scope: str | None = None
 
 
 def validate_password(password: str):
@@ -181,3 +187,11 @@ def validate_password(password: str):
 def validate_role(role: str):
     if role not in ROLES:
         raise HTTPException(422, f"role must be one of: {', '.join(ROLES)}")
+
+
+def validate_scope(scope: str, department: str | None):
+    from .access import ACCESS_SCOPES
+    if scope not in ACCESS_SCOPES:
+        raise HTTPException(422, f"access_scope must be one of: {', '.join(ACCESS_SCOPES)}")
+    if scope == "department" and not (department or "").strip():
+        raise HTTPException(422, "Set a department for users who see their department's contracts.")

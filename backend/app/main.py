@@ -13,7 +13,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import connection, init_db, is_postgres
-from .routers import ai, approvals, auth, comments, contracts, insights, obligations, signatures, sso, templates
+from .access import Guard
+from .routers import ai, approvals, auth, comments, contracts, insights, members, obligations, signatures, sso, templates
 from .services import rag
 from .workflow import run_reminders
 
@@ -77,5 +78,6 @@ def health():
     return {"status": "ok", "database": "postgresql" if is_postgres() else "sqlite", "model": os.getenv("AZURE_OPENAI_DEPLOYMENT", "not configured")}
 
 
-for module in (auth, sso, templates, contracts, approvals, obligations, comments, insights, ai, signatures):
-    app.include_router(module.router)
+for module in (auth, sso, templates, contracts, members, approvals, obligations, comments, insights, ai, signatures):
+    # Guard: any route about a specific contract answers 404 for users who cannot see it.
+    app.include_router(module.router, dependencies=[Guard])

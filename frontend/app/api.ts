@@ -16,8 +16,18 @@ export type User = {
   name: string;
   role: string;
   active: boolean;
+  department: string | null;
+  access_scope: AccessScope;
   permissions: Permission[];
 };
+
+export type AccessScope = "all" | "department" | "assigned";
+export const accessScopes: { value: AccessScope; label: string }[] = [
+  { value: "all", label: "All contracts" },
+  { value: "department", label: "Own department + involved" },
+  { value: "assigned", label: "Only contracts they're involved in" },
+];
+export type Member = { id: number; name: string; email: string; role: string; department: string | null; added_by: string | null; added_at: string };
 
 export type Contract = {
   id: number;
@@ -430,7 +440,10 @@ export const api = {
 
   directory: () => request<DirectoryEntry[]>("/api/users/directory"),
   users: () => request<User[]>("/api/users"),
-  createUser: (values: { email: string; name: string; role: string; password: string }) => json<User>("/api/users", "POST", values),
+  members: (id: number) => request<Member[]>(`/api/contracts/${id}/members`),
+  addMember: (id: number, user_id: number) => json<Member[]>(`/api/contracts/${id}/members`, "POST", { user_id }),
+  removeMember: (id: number, user_id: number) => request<Member[]>(`/api/contracts/${id}/members/${user_id}`, { method: "DELETE" }),
+  createUser: (values: { email: string; name: string; role: string; password: string; department?: string; access_scope?: AccessScope }) => json<User>("/api/users", "POST", values),
   updateUser: (id: number, values: Partial<User> & { password?: string }) => json<User>(`/api/users/${id}`, "PATCH", values),
 };
 

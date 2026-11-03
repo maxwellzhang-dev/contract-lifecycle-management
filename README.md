@@ -119,6 +119,21 @@ Clause supports sign-in with Microsoft Entra ID (or any OpenID Connect provider)
 
 Users are matched by their Entra object ID, then by email, so existing accounts keep their history. Deactivated users cannot sign in, and a role change from Entra ends the user's other sessions.
 
+## Who can see which contracts
+
+Roles decide what people can *do*. Each user's **Can see** setting (Users page) decides which contracts they *see*:
+
+| Setting | Sees |
+| --- | --- |
+| All contracts (default) | Every contract. Admins always see everything. |
+| Own department + involved | Contracts whose department matches theirs (case-insensitive), plus the ones they are involved in |
+| Only contracts they're involved in | Contracts where they are the owner or renewal owner, uploaded it, submitted or decided an approval, have an approval step waiting for their role, are a signer, or were added as a member |
+
+- Anyone who can edit contracts can share a contract with extra people from **Details → Who can see this contract**. The person is notified.
+- Contracts a user cannot see are hidden everywhere: lists, dashboard, vendors, reports, exports, obligations, audit trail, AI answers and @mention notifications. Opening one directly returns "not found".
+- Document search (LightRAG) spans every document, so it is only offered to users who see all contracts.
+- New single sign-on accounts get `SSO_DEFAULT_ACCESS_SCOPE` (default `all`). With `department`, Clause uses the Entra `department` claim when it is present (add it as an optional claim in the app registration).
+
 ## Roles
 
 | Role | Can do |

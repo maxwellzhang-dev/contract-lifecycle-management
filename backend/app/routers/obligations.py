@@ -3,6 +3,7 @@ from datetime import date, timedelta
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from ..access import visibility_sql
 from ..auth import current_user, require
 from ..database import add_audit, connection, utc_now
 from ..workflow import OBLIGATION_KINDS, OBLIGATION_STATUSES, run_reminders
@@ -56,9 +57,10 @@ def list_obligations(
     status: str = "",
     due_within: int | None = Query(None, ge=0, le=3650),
     contract_id: int | None = None,
-    _: dict = Depends(current_user),
+    user: dict = Depends(current_user),
 ):
-    clauses, params = [], []
+    vis, vparams = visibility_sql(user, "c")
+    clauses, params = [vis], list(vparams)
     if status:
         clauses.append("o.status=?")
         params.append(status)

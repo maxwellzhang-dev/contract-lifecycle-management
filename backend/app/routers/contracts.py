@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from ..access import visibility_sql
 from ..auth import current_user, require
 from ..database import add_audit, connection, rows_to_dicts, tag_match_sql, utc_now
 from ..services import rag
@@ -102,13 +103,15 @@ def contract_response(conn, contract_id: int) -> dict:
 
 
 @router.get("/dashboard")
-def dashboard(months: int = Query(12), _: dict = Depends(current_user)):
+def dashboard(months: int = Query(12), user: dict = Depends(current_user)):
     if months not in {1, 3, 6, 12}:
         raise HTTPException(422, "months must be one of 1, 3, 6 or 12")
     today = date.today().isoformat()
     cutoff = (date.today() + timedelta(days=30)).isoformat()
     period_start = (date.today() - timedelta(days={1: 31, 3: 92, 6: 183, 12: 366}[months])).isoformat()
-    in_period = "COALESCE(project_start_date, substr(created_at,1,10)) BETWEEN ? AND ?"
+    vis, vparams = visibility_sql(user, "contracts")
+    # Every query below is limited to the contracts this user may see.
+    in_period = f"COALESCE(project_start_date, substr(created_at,1,10)) BETWEEN ? AND ? AND {vis}"
     with connection() as conn:
         totals = conn.execute(
             f"""SELECT COUNT(*) total,
@@ -120,32 +123,36 @@ def dashboard(months: int = Query(12), _: dict = Depends(current_user)):
                 COALESCE(SUM(CASE WHEN validation_status!='Validated' THEN 1 ELSE 0 END),0) awaiting_validation,
                 COALESCE(SUM(CASE WHEN missing_fields!='[]' THEN 1 ELSE 0 END),0) missing_information
                 FROM contracts WHERE {in_period}""",
-            (today, period_start, today),
+            (today, period_start, today, *vparams),
         ).fetchone()
         expiring = conn.execute(
             f"SELECT COUNT(*) FROM contracts WHERE {in_period} AND project_end_date BETWEEN ? AND ?",
-            (period_start, today, today, cutoff),
+            (period_start, today, *vparams, today, cutoff),
         ).fetchone()[0]
         values = rows_to_dicts(conn.execute(
             f"""SELECT currency, ROUND(SUM(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0)),2) value
                FROM contracts WHERE {in_period} GROUP BY currency ORDER BY value DESC""",
-            (period_start, today),
+            (period_start, today, *vparams),
         ).fetchall())
         total_values = rows_to_dicts(conn.execute(
-            """SELECT currency, ROUND(SUM(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0)),2) value
-               FROM contracts WHERE currency IS NOT NULL GROUP BY currency ORDER BY value DESC""",
+            f"""SELECT currency, ROUND(SUM(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0)),2) value
+               FROM contracts WHERE currency IS NOT NULL AND {vis} GROUP BY currency ORDER BY value DESC""",
+            vparams,
         ).fetchall())
         statuses = rows_to_dicts(conn.execute(
             f"SELECT status, COUNT(*) count FROM contracts WHERE {in_period} GROUP BY status ORDER BY count DESC",
-            (period_start, today),
+            (period_start, today, *vparams),
         ).fetchall())
-        pending_approvals = conn.execute("SELECT COUNT(*) FROM approval_requests WHERE status='Pending'").fetchone()[0]
+        cvis, cparams = visibility_sql(user, "c")
+        pending_approvals = conn.execute(
+            f"SELECT COUNT(*) FROM approval_requests r JOIN contracts c ON c.id=r.contract_id WHERE r.status='Pending' AND {cvis}",
+            cparams).fetchone()[0]
         obligations = conn.execute(
-            """SELECT COALESCE(SUM(CASE WHEN o.due_date < ? THEN 1 ELSE 0 END),0) overdue,
+            f"""SELECT COALESCE(SUM(CASE WHEN o.due_date < ? THEN 1 ELSE 0 END),0) overdue,
                       COALESCE(SUM(CASE WHEN o.due_date BETWEEN ? AND ? THEN 1 ELSE 0 END),0) due_30
                FROM obligations o JOIN contracts c ON c.id=o.contract_id
-               WHERE o.status='Open' AND c.status NOT IN ('Completed','Cancelled')""",
-            (today, today, cutoff),
+               WHERE o.status='Open' AND c.status NOT IN ('Completed','Cancelled') AND {cvis}""",
+            (today, today, cutoff, *cparams),
         ).fetchone()
     return {
         **dict(totals), "expiring_30_days": expiring, "value_by_currency": values,
@@ -159,8 +166,12 @@ TOTAL_VALUE = "(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0))"
 
 
 def query_contracts(search="", status="", vendor="", department="", limit=100, owner="", tag="",
-                    currency="", min_value=None, max_value=None, end_from="", end_to=""):
+                    currency="", min_value=None, max_value=None, end_from="", end_to="", user: dict | None = None):
     clauses, params = [], []
+    if user is not None:
+        vis, vparams = visibility_sql(user, "contracts")
+        clauses.append(vis)
+        params.extend(vparams)
     if search:
         clauses.append("(title LIKE ? OR vendor_name LIKE ? OR project_name LIKE ? OR reference_number LIKE ? OR owner LIKE ? OR tags LIKE ?)")
         params.extend([f"%{search}%"] * 6)
@@ -204,9 +215,9 @@ class ContractFilters:
 
 @router.get("/contracts")
 def list_contracts(
-    filters: ContractFilters = Depends(), limit: int = Query(100, ge=1, le=1000), _: dict = Depends(current_user),
+    filters: ContractFilters = Depends(), limit: int = Query(100, ge=1, le=1000), user: dict = Depends(current_user),
 ):
-    return query_contracts(limit=limit, **filters.values)
+    return query_contracts(limit=limit, user=user, **filters.values)
 
 
 @router.get("/contracts/{contract_id}")
@@ -499,9 +510,17 @@ def version_preview(contract_id: int, version: int, _: dict = Depends(current_us
 def audit_log(
     limit: int = Query(100, ge=1, le=500),
     contract_id: int | None = None,
-    _: dict = Depends(require("audit.read")),
+    user: dict = Depends(require("audit.read")),
 ):
-    where, params = ("WHERE audit_log.contract_id=?", (contract_id,)) if contract_id else ("", ())
+    clauses, params = [], []
+    if contract_id:
+        clauses.append("audit_log.contract_id=?")
+        params.append(contract_id)
+    vis, vparams = visibility_sql(user, "contracts")
+    if vparams:  # restricted users see only the history of contracts they can see
+        clauses.append(f"audit_log.contract_id IS NOT NULL AND {vis}")
+        params.extend(vparams)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with connection() as conn:
         rows = conn.execute(
             f"""SELECT audit_log.*, contracts.title contract_title, contracts.vendor_name
@@ -520,8 +539,8 @@ def csv_safe(value):
 
 
 @router.get("/export/contracts.csv")
-def export_contracts(filters: ContractFilters = Depends(), _: dict = Depends(current_user)):
-    contracts = query_contracts(limit=5000, **filters.values)
+def export_contracts(filters: ContractFilters = Depends(), user: dict = Depends(current_user)):
+    contracts = query_contracts(limit=5000, user=user, **filters.values)
     stream = io.StringIO()
     fields = ["reference_number", "title", "vendor_name", "project_name", "status", "owner", "department", "project_start_date", "project_end_date", "renewal_date", "currency", "one_time_amount", "optional_amount", "validation_status", "tags"]
     for item in contracts:

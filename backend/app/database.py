@@ -144,7 +144,16 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
-    sso_subject TEXT
+    sso_subject TEXT,
+    department TEXT,
+    access_scope TEXT NOT NULL DEFAULT 'all'
+);
+CREATE TABLE IF NOT EXISTS contract_members (
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    added_by TEXT,
+    added_at TEXT NOT NULL,
+    PRIMARY KEY (contract_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS sso_states (
     state_hash TEXT PRIMARY KEY,
@@ -325,7 +334,7 @@ CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id)
 ADDED_COLUMNS = {
     "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT"},
     "approval_requests": {"ai_review_id": "INTEGER"},
-    "users": {"sso_subject": "TEXT"},
+    "users": {"sso_subject": "TEXT", "department": "TEXT", "access_scope": "TEXT NOT NULL DEFAULT 'all'"},
     "ai_portfolio_questions": {"source": "TEXT NOT NULL DEFAULT 'records'"},
 }
 

@@ -11,6 +11,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from ..access import visibility_sql
 from ..auth import current_user
 from ..database import connection
 
@@ -34,25 +35,27 @@ def currency_totals(contracts) -> list[dict]:
     return [{"currency": k, "value": round(v, 2)} for k, v in sorted(sums.items(), key=lambda kv: -kv[1])]
 
 
-def load_contracts(conn):
-    rows = [dict(r) for r in conn.execute("SELECT * FROM contracts").fetchall()]
+def load_contracts(conn, user: dict):
+    vis, params = visibility_sql(user, "contracts")
+    rows = [dict(r) for r in conn.execute(f"SELECT * FROM contracts WHERE {vis}", params).fetchall()]
     for row in rows:
         row["tags"] = json.loads(row.get("tags") or "[]")
     return rows
 
 
 @router.get("/vendors")
-def vendors(_: dict = Depends(current_user)):
+def vendors(user: dict = Depends(current_user)):
     today = date.today().isoformat()
     with connection() as conn:
-        contracts = load_contracts(conn)
+        contracts = load_contracts(conn, user)
+        vis, vparams = visibility_sql(user, "c")
         obligations = conn.execute(
-            """SELECT c.vendor_name, COUNT(*) open_count,
+            f"""SELECT c.vendor_name, COUNT(*) open_count,
                       SUM(CASE WHEN o.due_date < ? THEN 1 ELSE 0 END) overdue
                FROM obligations o JOIN contracts c ON c.id=o.contract_id
-               WHERE o.status='Open' AND c.status NOT IN ('Completed','Cancelled')
+               WHERE o.status='Open' AND c.status NOT IN ('Completed','Cancelled') AND {vis}
                GROUP BY c.vendor_name""",
-            (today,),
+            (today, *vparams),
         ).fetchall()
     obligation_counts = {row["vendor_name"]: dict(row) for row in obligations}
     grouped: dict[str, list] = defaultdict(list)
@@ -130,10 +133,10 @@ def check_params(group_by: str, field: str, start: str, end: str):
 
 @router.get("/reports/summary")
 def report(group_by: str = "department", date_field: str = "start", start: str = "", end: str = "",
-           _: dict = Depends(current_user)):
+           user: dict = Depends(current_user)):
     check_params(group_by, date_field, start, end)
     with connection() as conn:
-        contracts = filter_period(load_contracts(conn), start, end, date_field)
+        contracts = filter_period(load_contracts(conn, user), start, end, date_field)
     return {
         "group_by": group_by,
         "contract_count": len(contracts),
@@ -185,10 +188,10 @@ def summary_rows(contracts, group_by: str, currencies: list[str]):
 
 
 @router.get("/export/report.xlsx")
-def export_workbook(date_field: str = "start", start: str = "", end: str = "", _: dict = Depends(current_user)):
+def export_workbook(date_field: str = "start", start: str = "", end: str = "", user: dict = Depends(current_user)):
     check_params("department", date_field, start, end)
     with connection() as conn:
-        contracts = filter_period(load_contracts(conn), start, end, date_field)
+        contracts = filter_period(load_contracts(conn, user), start, end, date_field)
         ids = {c["id"] for c in contracts}
         obligations = [dict(r) for r in conn.execute(
             """SELECT o.*, c.title contract_title, c.vendor_name, c.reference_number

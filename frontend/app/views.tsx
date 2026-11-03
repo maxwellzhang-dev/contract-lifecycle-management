@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Bell, CalendarClock, CheckCircle2, ClipboardCheck, KeyRound, LogOut, UserPlus } from "lucide-react";
 import {
-  api, can, obligationStatuses, roles, ssoLoginUrl,
+  accessScopes, api, can, obligationStatuses, roles, ssoLoginUrl, type AccessScope,
   type InboxItem, type Notification, type Obligation, type User,
 } from "./api";
 import { EmptyState, SectionHeader, Status, amountLabel, dateLabel, dateTimeLabel, errorText, initials, roleLabel } from "./shared";
@@ -173,7 +173,8 @@ export function ObligationsView({ user, onOpen }: { user: User; onOpen: (contrac
 
 export function UsersView({ user }: { user: User }) {
   const [users, setUsers] = useState<User[]>([]);
-  const [form, setForm] = useState({ name: "", email: "", role: "viewer", password: "" });
+  const blankForm = { name: "", email: "", role: "viewer", password: "", department: "", access_scope: "all" as AccessScope };
+  const [form, setForm] = useState(blankForm);
   const [message, setMessage] = useState("");
   const [tick, setTick] = useState(0);
   useEffect(() => {
@@ -188,14 +189,24 @@ export function UsersView({ user }: { user: User }) {
   async function create(event: FormEvent) {
     event.preventDefault();
     await run(() => api.createUser(form), `Created ${form.name}.`);
-    setForm({ name: "", email: "", role: "viewer", password: "" });
+    setForm(blankForm);
+  }
+  function changeScope(target: User, scope: AccessScope) {
+    let department = target.department ?? "";
+    if (scope === "department") {
+      const answer = window.prompt(`Department for ${target.name} (must match the contracts' department):`, department);
+      if (answer === null || !answer.trim()) return;
+      department = answer.trim();
+    }
+    void run(() => api.updateUser(target.id, { access_scope: scope, department: department || null }),
+      `${target.name} now sees ${accessScopes.find(a => a.value === scope)!.label.toLowerCase()}${scope === "department" ? ` (${department})` : ""}.`);
   }
   function resetPassword(target: User) {
     const password = window.prompt(`New password for ${target.name} (at least 10 characters):`);
     if (password) void run(() => api.updateUser(target.id, { password }), `Password reset for ${target.name}. Their sessions were signed out.`);
   }
   return <>
-    <SectionHeader eyebrow="ADMINISTRATION" title="Users & roles" copy="Roles decide what people can do. Approvers are chosen by role at each approval step." />
+    <SectionHeader eyebrow="ADMINISTRATION" title="Users & roles" copy="Roles decide what people can do; “Can see” decides which contracts they see. Involved means owner, uploader, approver, signer or added member." />
     <section className="panel wf-roles">
       <p><b>Admin</b> everything, including deleting contracts and managing users · <b>Legal</b> upload, edit, validate, submit and approve legal steps · <b>Procurement</b> upload, edit, validate and submit · <b>Finance</b> edit, manage obligations and approve finance steps · <b>Viewer</b> read only.</p>
     </section>
@@ -206,13 +217,16 @@ export function UsersView({ user }: { user: User }) {
         <label className="wf-field">Email<input type="email" required value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} /></label>
         <label className="wf-field">Role<select value={form.role} onChange={e => setForm({ ...form, role: e.target.value })}>{roles.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}</select></label>
         <label className="wf-field">Temporary password<input type="password" minLength={10} required value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} /></label>
+        <label className="wf-field">Can see<select value={form.access_scope} onChange={e => setForm({ ...form, access_scope: e.target.value as AccessScope })}>{accessScopes.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}</select></label>
+        <label className="wf-field">Department{form.access_scope === "department" ? "" : " (optional)"}<input required={form.access_scope === "department"} value={form.department} onChange={e => setForm({ ...form, department: e.target.value })} placeholder="e.g. Finance" /></label>
       </div>
       <button className="primary-button">Add user</button>
     </form>
     {message && <p className="save-message">{message}</p>}
     <section className="panel"><ul className="wf-list">{users.map(item => <li key={item.id} className={item.active ? "" : "inactive"}>
       <span className="audit-avatar">{initials(item.name)}</span>
-      <div><strong>{item.name}{item.id === user.id ? " (you)" : ""}</strong><small>{item.email}{item.active ? "" : " · deactivated"}</small></div>
+      <div><strong>{item.name}{item.id === user.id ? " (you)" : ""}</strong><small>{item.email}{item.department ? ` · ${item.department}` : ""}{item.active ? "" : " · deactivated"}</small></div>
+      <select aria-label={`Contracts ${item.name} can see`} value={item.access_scope} disabled={item.role === "admin"} title={item.role === "admin" ? "Admins always see every contract" : undefined} onChange={e => changeScope(item, e.target.value as AccessScope)}>{accessScopes.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}</select>
       <select aria-label={`Role for ${item.name}`} value={item.role} disabled={item.id === user.id} onChange={e => void run(() => api.updateUser(item.id, { role: e.target.value }), `${item.name} is now ${roleLabel(e.target.value)}.`)}>{roles.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}</select>
       <button className="secondary-button" onClick={() => resetPassword(item)}>Reset password</button>
       {item.id !== user.id && <button className={item.active ? "danger-button" : "secondary-button"} onClick={() => void run(() => api.updateUser(item.id, { active: !item.active }), `${item.name} ${item.active ? "deactivated" : "reactivated"}.`)}>{item.active ? "Deactivate" : "Reactivate"}</button>}
