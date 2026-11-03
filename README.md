@@ -119,6 +119,24 @@ Clause supports sign-in with Microsoft Entra ID (or any OpenID Connect provider)
 
 Users are matched by their Entra object ID, then by email, so existing accounts keep their history. Deactivated users cannot sign in, and a role change from Entra ends the user's other sessions.
 
+## Background jobs
+
+Slow or unreliable work runs as background jobs, stored in the database with the change that needs them:
+
+- **AI extraction**: an upload returns at once and the contract opens straight away. The details fill in on their own when the AI has read the document; validation waits until then. Anything typed in the meantime is kept.
+- **Emails**: a short SMTP outage no longer loses messages.
+- **AI review for approvers** after a contract is submitted.
+
+Each job is retried with growing pauses (30 s, 1 min, 2 min, …). After its last attempt, extraction falls back to simple local rules so the contract is never stuck. Jobs left running by a crashed process are picked up again after 15 minutes. Jobs are claimed atomically, so several API replicas on PostgreSQL never run the same job twice. Admins can watch jobs and retry failed ones under **Users & roles → Background jobs**.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `JOBS_ENABLED` | `1` | Run job workers in this API process. Set `0` on replicas that should only serve requests. |
+| `JOB_WORKERS` | `2` | Worker threads per process |
+| `JOB_POLL_SECONDS` | `2` | How often idle workers look for due jobs (new jobs wake them at once) |
+
+The LightRAG document index keeps its own queue (see above).
+
 ## Who can see which contracts
 
 Roles decide what people can *do*. Each user's **Can see** setting (Users page) decides which contracts they *see*:
@@ -249,6 +267,5 @@ Azure Container Apps deployment guidance is available in [docs/azure-container-a
 - Accounts can sign in with a password or with Microsoft Entra ID. There is no multi-factor authentication for password accounts; use Entra ID (with its MFA policies) and `PASSWORD_LOGIN=0` in production.
 - SQLite suits a single machine. Use PostgreSQL (`DATABASE_URL`) for production and for more than one API replica.
 - E-signature is a simple electronic signature with an audit trail and certificate, not a qualified or certificate-based digital signature.
-- AI extraction runs synchronously during upload. Production use should move extraction to a reliable background job queue.
 - Reminders run inside the API process. They are de-duplicated in the database, so several replicas on PostgreSQL do not send duplicates; you can still run them from one scheduled job instead (`REMINDERS_ENABLED=0` on the replicas).
 - DOCX preview renders readable paragraphs and tables; it is not a pixel-perfect representation of Word page layout.

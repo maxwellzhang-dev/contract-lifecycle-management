@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from ..access import visibility_sql
 from ..auth import current_user, require
 from ..database import add_audit, connection, rows_to_dicts, tag_match_sql, utc_now
+from .. import jobs
 from ..services import rag
 from ..services.extraction import FIELDS, extract_contract
 from ..storage import save_upload, stored_file
@@ -284,29 +285,20 @@ def upload_contract(
     related_project: str = Form(""),
     user: dict = Depends(require("contract.create")),
 ):
+    """Store the document and create the contract now; AI extraction runs as a background job."""
     destination = save_upload(file)
-    extracted = extract_contract(destination)
     now = utc_now()
-    extracted["title"] = extracted.get("title") or Path(file.filename or "Untitled contract").stem
-    # New uploads always start at Quoting: Under Review and later are reached through approvals.
-    extracted["status"] = "Quoting"
-    extracted["vendor_name"] = extracted.get("vendor_name") or related_vendor or None
-    extracted["project_name"] = extracted.get("project_name") or related_project or None
-    columns = FIELDS + ["extraction_confidence", "missing_fields", "low_confidence_fields", "field_confidences", "extraction_note"]
-    values = []
-    for column in columns:
-        value = extracted.get(column)
-        if column in {"missing_fields", "low_confidence_fields", "field_confidences"}:
-            value = json.dumps(value or ([] if column != "field_confidences" else {}))
-        values.append(value)
+    title = Path(file.filename or "Untitled contract").stem
     size = destination.stat().st_size
     with connection() as conn:
         cursor = conn.execute(
-            f"""INSERT INTO contracts ({','.join(columns)}, file_name, file_type, file_path, file_size,
-                document_version, uploaded_by, upload_date, validation_status, created_at, updated_at)
-                VALUES ({','.join(['?'] * len(columns))},?,?,?,?,?,?,?,?,?,?)""",
-            (*values, file.filename, file.content_type, str(destination), size,
-             1, user["name"], now, "Pending", now, now),
+            """INSERT INTO contracts (title, vendor_name, project_name, status, file_name, file_type, file_path, file_size,
+                document_version, uploaded_by, upload_date, validation_status, extraction_status, extraction_note,
+                created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (title, related_vendor.strip() or None, related_project.strip() or None, "Quoting", file.filename,
+             file.content_type, str(destination), size, 1, user["name"], now, "Pending", "Queued",
+             "AI extraction is queued", now, now),
         )
         contract_id = cursor.lastrowid
         conn.execute(
@@ -315,9 +307,65 @@ def upload_contract(
             (contract_id, 1, file.filename, file.content_type, str(destination), size, user["name"], now, "Original upload"),
         )
         add_audit(conn, "Contract uploaded", user["name"], contract_id, f"Uploaded {file.filename}")
+        jobs.enqueue(conn, "extract", {"contract_id": contract_id, "placeholder_title": title})
         rag.queue(conn, contract_id)
-        add_audit(conn, "AI extraction completed", "Azure OpenAI", contract_id, extracted.get("extraction_note"))
+    with connection() as conn:  # in inline mode the extraction has already run
         return contract_response(conn, contract_id)
+
+
+EXTRACTION_ATTEMPTS = 4
+
+
+def apply_extraction(contract_id: int, extracted: dict, placeholder_title: str | None):
+    """Fill the contract from an extraction result without overwriting anything a person entered meanwhile."""
+    with connection() as conn:
+        contract = conn.execute("SELECT * FROM contracts WHERE id=?", (contract_id,)).fetchone()
+        if not contract:
+            return
+        updates = {}
+        for field in FIELDS:
+            if field == "status":  # new uploads always start at Quoting; approvals move them on
+                continue
+            value = extracted.get(field)
+            current = contract[field]
+            empty = current in (None, "") or (field == "title" and current == placeholder_title)
+            if value not in (None, "") and empty:
+                updates[field] = value
+        merged = {field: updates.get(field, contract[field]) for field in FIELDS}
+        filled_by_ai = set(updates)
+        missing = [f for f in extracted.get("missing_fields") or [] if f in FIELDS and merged.get(f) in (None, "")]
+        low = [f for f in extracted.get("low_confidence_fields") or [] if f in filled_by_ai]
+        confidences = {k: v for k, v in (extracted.get("field_confidences") or {}).items() if k in filled_by_ai}
+        updates.update({
+            "extraction_confidence": extracted.get("extraction_confidence"), "missing_fields": json.dumps(missing),
+            "low_confidence_fields": json.dumps(low), "field_confidences": json.dumps(confidences),
+            "extraction_note": extracted.get("extraction_note"), "extraction_status": "Done", "updated_at": utc_now(),
+        })
+        conn.execute(f"UPDATE contracts SET {', '.join(f'{k}=?' for k in updates)} WHERE id=?", (*updates.values(), contract_id))
+        add_audit(conn, "AI extraction completed", "Azure OpenAI", contract_id, extracted.get("extraction_note"))
+
+
+def extraction_job(payload: dict, attempt: int):
+    contract_id = payload["contract_id"]
+    with connection() as conn:
+        contract = conn.execute("SELECT file_path FROM contracts WHERE id=?", (contract_id,)).fetchone()
+        if not contract:
+            return  # deleted meanwhile
+        conn.execute("UPDATE contracts SET extraction_status='Running', extraction_note=? WHERE id=?",
+                     (f"AI extraction is running (attempt {attempt})", contract_id))
+    final = attempt >= EXTRACTION_ATTEMPTS or jobs.mode() == "inline"
+    extracted = extract_contract(stored_file(contract["file_path"]), allow_fallback=final)
+    apply_extraction(contract_id, extracted, payload.get("placeholder_title"))
+
+
+def extraction_failed(payload: dict, error: str):
+    with connection() as conn:
+        conn.execute("UPDATE contracts SET extraction_status='Failed', extraction_note=? WHERE id=?",
+                     (f"AI extraction failed: {error[:300]}. Enter the details by hand.", payload["contract_id"]))
+        add_audit(conn, "AI extraction failed", "System", payload["contract_id"], error[:300])
+
+
+jobs.handler("extract", max_attempts=EXTRACTION_ATTEMPTS, on_failure=extraction_failed)(extraction_job)
 
 
 def check_dates(values: dict):
@@ -414,7 +462,9 @@ def update_contract(contract_id: int, update: ContractUpdate, user: dict = Depen
 def validate_contract(contract_id: int, user: dict = Depends(require("contract.validate"))):
     now = utc_now()
     with connection() as conn:
-        load_contract(conn, contract_id)
+        contract = load_contract(conn, contract_id)
+        if contract["extraction_status"] in ("Queued", "Running"):
+            raise HTTPException(409, "The AI is still reading this document. Validate once its details are filled in.")
         conn.execute(
             "UPDATE contracts SET validation_status='Validated', reviewed_by=?, validated_at=?, updated_at=? WHERE id=?",
             (user["name"], now, now, contract_id),

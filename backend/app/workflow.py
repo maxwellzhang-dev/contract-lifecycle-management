@@ -6,6 +6,7 @@ import smtplib
 from datetime import date
 from email.message import EmailMessage
 
+from . import jobs
 from .database import utc_now
 
 log = logging.getLogger("clause.workflow")
@@ -118,28 +119,42 @@ def notify(conn, user_ids, kind: str, title: str, body: str | None = None,
             created += 1
             email = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
             if email:
-                send_email(email["email"], title, body or title)
+                send_email(email["email"], title, body or title, conn)
     return created
 
 
-def send_email(to: str, subject: str, body: str):
-    host = os.getenv("SMTP_HOST")
-    if not host:
+def send_email(to: str, subject: str, body: str, conn=None):
+    """Send an email when SMTP is configured. With `conn`, it is queued in that transaction and
+    retried by the job worker; without, it is sent now and failures are only logged."""
+    if not os.getenv("SMTP_HOST"):
         return
+    if conn is not None:
+        jobs.enqueue(conn, "email", {"to": to, "subject": subject, "body": body})
+        return
+    try:
+        deliver_email(to, subject, body)
+    except Exception:  # email is best effort; the in-app notification already exists
+        log.exception("Could not send email to %s", to)
+
+
+def deliver_email(to: str, subject: str, body: str):
     message = EmailMessage()
     message["From"] = os.getenv("SMTP_FROM", "clause@localhost")
     message["To"] = to
     message["Subject"] = f"[Clause] {subject}"
     message.set_content(body)
-    try:
-        with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587")), timeout=10) as smtp:
-            if os.getenv("SMTP_STARTTLS", "1") == "1":
-                smtp.starttls()
-            if os.getenv("SMTP_USERNAME"):
-                smtp.login(os.getenv("SMTP_USERNAME"), os.getenv("SMTP_PASSWORD", ""))
-            smtp.send_message(message)
-    except Exception:  # email is best effort; the in-app notification already exists
-        log.exception("Could not send reminder email to %s", to)
+    with smtplib.SMTP(os.getenv("SMTP_HOST"), int(os.getenv("SMTP_PORT", "587")), timeout=10) as smtp:
+        if os.getenv("SMTP_STARTTLS", "1") == "1":
+            smtp.starttls()
+        if os.getenv("SMTP_USERNAME"):
+            smtp.login(os.getenv("SMTP_USERNAME"), os.getenv("SMTP_PASSWORD", ""))
+        smtp.send_message(message)
+
+
+@jobs.handler("email", max_attempts=5)
+def email_job(payload: dict, attempt: int):
+    if os.getenv("SMTP_HOST"):
+        deliver_email(payload["to"], payload["subject"], payload["body"])
 
 
 # --- reminders -----------------------------------------------------------------------

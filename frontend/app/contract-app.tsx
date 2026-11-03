@@ -265,7 +265,7 @@ function AuditView({ items }: { items: AuditItem[] }) {
 function UploadModal({ onClose, onComplete }: { onClose: () => void; onComplete: (c: Contract) => Promise<void> }) {
   const [file, setFile] = useState<File | null>(null); const [vendor, setVendor] = useState(""); const [project, setProject] = useState(""); const [busy, setBusy] = useState(false); const [error, setError] = useState("");
   async function submit(event: FormEvent) { event.preventDefault(); if (!file) return; setBusy(true); setError(""); const form = new FormData(); form.append("file", file); form.append("related_vendor", vendor); form.append("related_project", project); try { await onComplete(await api.upload(form)); } catch (err) { setError(err instanceof Error ? err.message : "Upload failed"); setBusy(false); } }
-  return <div className="modal-backdrop" onMouseDown={onClose}><form className="upload-modal" onSubmit={submit} onMouseDown={e => e.stopPropagation()}><header><div><p className="eyebrow">NEW CONTRACT</p><h2>Upload for AI extraction</h2><p>Your file is stored locally, then securely sent to your organization’s Azure OpenAI deployment.</p></div><button type="button" onClick={onClose}>×</button></header><label className={`drop-zone ${file ? "has-file" : ""}`}><input type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.webp" onChange={e => setFile(e.target.files?.[0] ?? null)} required/><span>{file ? "✓" : "⇧"}</span><strong>{file ? file.name : "Choose a contract document"}</strong><small>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · Ready to extract` : "PDF, DOCX, PNG, JPG or WEBP · Maximum 25 MB"}</small></label><div className="form-grid"><label>Related vendor <input value={vendor} onChange={e => setVendor(e.target.value)} placeholder="Optional hint"/></label><label>Related project <input value={project} onChange={e => setProject(e.target.value)} placeholder="Optional hint"/></label></div>{error && <p className="form-error">{error}</p>}<footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!file || busy}>{busy ? <><span className="spinner"/>Extracting with GPT-5.4…</> : "Upload & extract"}</button></footer></form></div>;
+  return <div className="modal-backdrop" onMouseDown={onClose}><form className="upload-modal" onSubmit={submit} onMouseDown={e => e.stopPropagation()}><header><div><p className="eyebrow">NEW CONTRACT</p><h2>Upload for AI extraction</h2><p>Your file is stored locally, then securely sent to your organization’s Azure OpenAI deployment.</p></div><button type="button" onClick={onClose}>×</button></header><label className={`drop-zone ${file ? "has-file" : ""}`}><input type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.webp" onChange={e => setFile(e.target.files?.[0] ?? null)} required/><span>{file ? "✓" : "⇧"}</span><strong>{file ? file.name : "Choose a contract document"}</strong><small>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · Ready to extract` : "PDF, DOCX, PNG, JPG or WEBP · Maximum 25 MB"}</small></label><div className="form-grid"><label>Related vendor <input value={vendor} onChange={e => setVendor(e.target.value)} placeholder="Optional hint"/></label><label>Related project <input value={project} onChange={e => setProject(e.target.value)} placeholder="Optional hint"/></label></div>{error && <p className="form-error">{error}</p>}<footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={!file || busy}>{busy ? <><span className="spinner"/>Uploading…</> : "Upload & extract"}</button></footer></form></div>;
 }
 
 const editableFields: { key: keyof Contract; label: string; type?: string; wide?: boolean }[] = [
@@ -284,6 +284,27 @@ function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }
   // While an approval is pending only notes (and status, for hold/cancel) can change.
   const fieldDisabled = (key: keyof Contract) => !canEdit || (locked && !["notes", "status", "tags"].includes(key as string));
   const statusOptions = [saved.status, ...saved.allowed_transitions];
+  const extracting = saved.extraction_status === "Queued" || saved.extraction_status === "Running";
+  const [pollTick, setPollTick] = useState(0);
+  // While the AI reads the document in the background, check back and fill in the form,
+  // keeping anything the user has typed in the meantime.
+  useEffect(() => {
+    if (!extracting) return;
+    const timer = window.setTimeout(async () => {
+      try {
+        const fresh = await api.contract(contract.id);
+        if (fresh.extraction_status === "Queued" || fresh.extraction_status === "Running") { setPollTick(t => t + 1); return; }
+        setForm(current => {
+          const merged = { ...fresh } as Record<string, unknown>;
+          for (const key of Object.keys(current) as (keyof Contract)[]) if (current[key] !== saved[key]) merged[key] = current[key];
+          return merged as Contract;
+        });
+        setSaved(fresh);
+        await onSaved(fresh);
+      } catch { setPollTick(t => t + 1); }
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [extracting, pollTick, contract.id, saved, onSaved]);
 
   async function changed(next: Contract) { setForm(next); setSaved(next); await onSaved(next); }
   async function save(validate = false) { setBusy(true); setMessage(""); try { let result = await api.update(contract.id, form); if (validate) result = await api.validate(contract.id); await changed(result); setMessage(validate ? "Contract validated." : "Changes saved."); } catch (err) { setMessage(errorText(err, "Could not save")); } finally { setBusy(false); } }
@@ -295,9 +316,11 @@ function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }
       <div className="fields-pane">
         <div className="wf-tabs" role="tablist">{drawerTabs.map(name => <button key={name} role="tab" aria-selected={tab === name} className={tab === name ? "active" : ""} onClick={() => setTab(name)}>{name}{name === "Approvals" && saved.pending_approval_id ? <i className="wf-dot"/> : null}</button>)}</div>
         {tab === "Details" && <>
+          {extracting && <p className="wf-hint extracting"><span className="spinner"/> The AI is reading the document. Details fill in automatically; you can keep working meanwhile.</p>}
+          {saved.extraction_status === "Failed" && <p className="wf-hint warn">{saved.extraction_note}</p>}
           {locked && <p className="wf-hint warn">Awaiting approval: terms are locked. Withdraw the request on the Approvals tab to edit them.</p>}
           {!canEdit && <p className="wf-hint">Your role has read-only access.</p>}
-          {form.extraction_note?.startsWith("Created") ? <div className="extraction-summary"><div><span>✎</span><div><strong>Entered by hand</strong><p>{form.extraction_note}</p></div></div></div> : <div className="extraction-summary"><div><span>✦</span><div><strong>AI extraction</strong><p>{form.extraction_note ?? "Review each field before validation."}</p></div></div><b>{Math.round((form.extraction_confidence ?? 0) * 100)}%</b></div>}
+          {extracting ? null : form.extraction_note?.startsWith("Created") ? <div className="extraction-summary"><div><span>✎</span><div><strong>Entered by hand</strong><p>{form.extraction_note}</p></div></div></div> : <div className="extraction-summary"><div><span>✦</span><div><strong>AI extraction</strong><p>{form.extraction_note ?? "Review each field before validation."}</p></div></div><b>{Math.round((form.extraction_confidence ?? 0) * 100)}%</b></div>}
           <div className="wf-field wf-tags-field">Tags<TagEditor value={form.tags ?? []} onChange={tags => setForm({ ...form, tags })} disabled={fieldDisabled("tags")} suggestions={allTags} /></div>
           <div className="edit-grid">{editableFields.map(field => { const score = form.field_confidences?.[field.key as string]; const low = form.low_confidence_fields?.includes(field.key as string); const missing = form.missing_fields?.includes(field.key as string); const value = form[field.key]; const isLong = ["deliverables","payment_terms","notes"].includes(field.key); const disabled = fieldDisabled(field.key); return <label key={field.key} className={field.wide ? "wide" : ""}><span>{field.label}{missing ? <em className="field-flag missing">Missing</em> : low ? <em className="field-flag low">Low {score ? `${Math.round(score*100)}%` : "confidence"}</em> : score ? <em className="field-flag good">{Math.round(score*100)}%</em> : null}</span>{field.key === "status" ? <select disabled={disabled} value={String(value ?? saved.status)} onChange={e => setForm({...form,status:e.target.value})}>{contractStatuses.filter(item => statusOptions.includes(item)).map(item => <option key={item}>{item}</option>)}</select> : isLong ? <textarea disabled={disabled} value={(value as string) ?? ""} onChange={e => setForm({...form,[field.key]:e.target.value})}/> : <input disabled={disabled} type={field.type ?? "text"} value={(value as string | number) ?? ""} onChange={e => setForm({...form,[field.key]:field.type === "number" ? (e.target.value ? Number(e.target.value) : null) : e.target.value})}/>}</label>; })}</div>
           {saved.status === "Quoting" && <p className="wf-hint">To move past Quoting, validate the details and submit the contract on the Approvals tab.</p>}
@@ -313,6 +336,6 @@ function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }
       </div></div>
     <footer>{can(user, "contract.delete") && <button className="danger-button" onClick={remove} disabled={busy}>Delete contract</button>}<div>{message && <span className="save-message">{message}</span>}</div>
       {tab === "Details" && canEdit && <button className="secondary-button" onClick={() => save(false)} disabled={busy}>Save changes</button>}
-      {tab === "Details" && can(user, "contract.validate") && <button className="primary-button" onClick={() => save(true)} disabled={busy || saved.validation_status === "Validated" || locked}>{saved.validation_status === "Validated" ? "✓ Validated" : "Confirm & validate"}</button>}
+      {tab === "Details" && can(user, "contract.validate") && <button className="primary-button" onClick={() => save(true)} disabled={busy || saved.validation_status === "Validated" || locked || extracting}>{saved.validation_status === "Validated" ? "✓ Validated" : "Confirm & validate"}</button>}
     </footer></section></div>;
 }

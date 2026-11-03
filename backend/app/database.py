@@ -27,6 +27,14 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_after_commit: dict[int, list] = {}
+
+
+def after_commit(conn, callback):
+    """Run `callback` once this connection's transaction has committed and closed."""
+    _after_commit.setdefault(id(conn), []).append(callback)
+
+
 @contextmanager
 def connection():
     if is_postgres():
@@ -38,11 +46,16 @@ def connection():
         conn = sqlite3.connect(path)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA foreign_keys = ON")
+    callbacks = []
     try:
         yield conn
         conn.commit()
+        callbacks = _after_commit.pop(id(conn), [])
     finally:
+        _after_commit.pop(id(conn), None)
         conn.close()
+    for callback in callbacks:
+        callback()
 
 
 def tag_match_sql(column: str = "contracts.tags") -> str:
@@ -122,6 +135,7 @@ CREATE TABLE IF NOT EXISTS contracts (
     file_size INTEGER,
     document_version INTEGER NOT NULL DEFAULT 1,
     signed_at TEXT,
+    extraction_status TEXT,
     uploaded_by TEXT,
     upload_date TEXT,
     created_at TEXT NOT NULL,
@@ -326,13 +340,28 @@ CREATE TABLE IF NOT EXISTS rag_documents (
     error TEXT,
     updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 4,
+    run_after TEXT NOT NULL,
+    last_error TEXT,
+    locked_by TEXT,
+    locked_at TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, run_after);
 CREATE INDEX IF NOT EXISTS idx_ai_review_contract ON ai_reviews(contract_id);
 CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id);
 """
 
 # Columns added after the first prototype release; older databases get them via ALTER TABLE.
 ADDED_COLUMNS = {
-    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT"},
+    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT", "extraction_status": "TEXT"},
     "approval_requests": {"ai_review_id": "INTEGER"},
     "users": {"sso_subject": "TEXT", "department": "TEXT", "access_scope": "TEXT NOT NULL DEFAULT 'all'"},
     "ai_portfolio_questions": {"source": "TEXT NOT NULL DEFAULT 'records'"},

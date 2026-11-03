@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from ..access import sees_everything, visibility_sql, visible_ids
 from ..auth import current_user, require
 from ..database import add_audit, connection, utc_now
+from .. import jobs
 from ..services import llm, rag
 from ..services.extraction import extract_text_and_images
 from ..storage import stored_file
@@ -212,18 +213,29 @@ def auto_review_enabled() -> bool:
     return llm.configured() and os.getenv("AI_REVIEW_ON_SUBMIT", "1") == "1"
 
 
-def review_for_approval(request_id: int, contract_id: int):
-    """Background task after submission: make sure approvers see an AI review of the submitted version."""
-    try:
-        review = generate_review(contract_id, "Clause AI")
-    except Exception as exc:  # the approval itself must never fail because the AI did
-        log.warning("Automatic AI review for contract %s failed: %s", contract_id, exc)
-        with connection() as conn:
-            add_audit(conn, "AI review failed", "Clause AI", contract_id, str(exc)[:300])
-        return
+def review_for_approval(payload: dict, attempt: int):
+    """Job after submission: make sure approvers see an AI review of the submitted version."""
+    review = generate_review(payload["contract_id"], "Clause AI")
     with connection() as conn:
         conn.execute("UPDATE approval_requests SET ai_review_id=? WHERE id=? AND ai_review_id IS NULL",
-                     (review["id"], request_id))
+                     (review["id"], payload["request_id"]))
+
+
+def review_for_approval_failed(payload: dict, error: str):
+    # The approval itself never depends on the AI.
+    log.warning("Automatic AI review for contract %s failed: %s", payload["contract_id"], error)
+    with connection() as conn:
+        add_audit(conn, "AI review failed", "Clause AI", payload["contract_id"], error[:300])
+
+
+jobs.handler("ai_review", max_attempts=3, on_failure=review_for_approval_failed)(review_for_approval)
+
+
+def review_job_pending(conn, request_id: int) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM jobs WHERE kind='ai_review' AND status IN ('queued','running') AND payload LIKE ?",
+        (f'{{"request_id": {int(request_id)},%',),
+    ).fetchone() is not None
 
 
 @router.post("/contracts/{contract_id}/ai/review", status_code=201)

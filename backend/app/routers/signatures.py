@@ -99,7 +99,7 @@ def invite(conn, request, contract, signer, link: str):
             f"{' with ' + contract['vendor_name'] if contract['vendor_name'] else ''}.\n"
             + (f"\nMessage: {request['message']}\n" if request["message"] else "")
             + f"\nReview and sign here (the link is personal and expires in {link_days()} days):\n{link}\n")
-    send_email(signer["email"], subject, body)
+    send_email(signer["email"], subject, body, conn)
     if signer["user_id"]:
         notify(conn, [signer["user_id"]], "signature", subject, "Open the signing link in your email.", contract["id"],
                f"sign:{signer['id']}:{request['id']}")
@@ -377,7 +377,7 @@ def complete(conn, request, contract):
            f"Signed: {contract['title']}", "Everyone has signed. The signed copy is on the contract's Signatures tab.", contract["id"])
     for signer in signers:
         send_email(signer["email"], f"Completed: {contract['title']}",
-                   f"All parties have signed “{contract['title']}”. Ask the sender for the signed copy if you need one.")
+                   f"All parties have signed “{contract['title']}”. Ask the sender for the signed copy if you need one.", conn)
 
 
 def build_signed_pdf(source, target, request, contract, signers, completed_at: str):

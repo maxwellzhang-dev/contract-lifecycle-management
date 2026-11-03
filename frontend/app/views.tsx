@@ -6,6 +6,7 @@ import {
   accessScopes, api, can, obligationStatuses, roles, ssoLoginUrl, type AccessScope,
   type InboxItem, type Notification, type Obligation, type User,
 } from "./api";
+import { JobsPanel } from "./system";
 import { EmptyState, SectionHeader, Status, amountLabel, dateLabel, dateTimeLabel, errorText, initials, roleLabel } from "./shared";
 
 // --- sign in -------------------------------------------------------------------------
@@ -231,5 +232,6 @@ export function UsersView({ user }: { user: User }) {
       <button className="secondary-button" onClick={() => resetPassword(item)}>Reset password</button>
       {item.id !== user.id && <button className={item.active ? "danger-button" : "secondary-button"} onClick={() => void run(() => api.updateUser(item.id, { active: !item.active }), `${item.name} ${item.active ? "deactivated" : "reactivated"}.`)}>{item.active ? "Deactivate" : "Reactivate"}</button>}
     </li>)}</ul></section>
+    <JobsPanel />
   </>;
 }
