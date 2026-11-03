@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from ..auth import current_user, require
 from ..database import add_audit, connection, utc_now
+from ..services import rag
 from ..storage import upload_dir
 from .contracts import ContractUpdate, check_dates, contract_response, normalise_tags
 
@@ -191,6 +192,8 @@ def create_contract(body: ContractCreate, user: dict = Depends(require("contract
                  user["name"], now, note),
             )
         add_audit(conn, "Contract created", user["name"], contract_id, note)
+        if file_values:
+            rag.queue(conn, contract_id)
         return contract_response(conn, contract_id)
 
 

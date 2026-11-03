@@ -8,8 +8,18 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-COPY backend/requirements.txt ./backend/requirements.txt
+COPY backend/requirements.txt backend/requirements-rag.txt ./backend/
 RUN pip install --no-cache-dir -r backend/requirements.txt
+
+# Optional document search (LightRAG): docker build --build-arg INSTALL_RAG=1 …
+# The tokenizer file is fetched at build time so the container needs no internet access for it.
+ARG INSTALL_RAG=0
+ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken \
+    RAG_DIR=/data/rag
+RUN if [ "$INSTALL_RAG" = "1" ]; then \
+      pip install --no-cache-dir -r backend/requirements-rag.txt && \
+      python -c "import tiktoken; tiktoken.get_encoding('o200k_base')"; \
+    fi
 
 COPY backend/app ./backend/app
 

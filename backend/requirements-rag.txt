@@ -1,0 +1,4 @@
+# Optional: document search with LightRAG (graph RAG). Install on top of requirements.txt:
+#   pip install -r backend/requirements.txt -r backend/requirements-rag.txt
+lightrag-hku>=1.5.7,<1.6
+numpy>=1.26

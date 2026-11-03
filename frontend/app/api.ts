@@ -255,8 +255,14 @@ export type AiComparison = {
   summary: string;
   changes: { topic: string; before: string | null; after: string | null; impact: "favourable" | "unfavourable" | "neutral" | "unclear"; note: string }[];
 };
+export type RagStatus = {
+  enabled: boolean; reason: string | null; documents: number; can_reindex: boolean;
+  counts: Partial<Record<"Queued" | "Indexing" | "Indexed" | "Failed" | "Delete" | "Removing", number>>;
+  failed: { contract_id: number; title: string | null; error: string | null }[];
+};
 export type PortfolioAnswer = {
   id: number;
+  source: "records" | "documents";
   question: string;
   asked_by: string;
   created_at: string;
@@ -410,6 +416,9 @@ export const api = {
   sign: (token: string, signed_name: string, signature_image: string | null) =>
     json<SigningView>(`/api/sign/${encodeURIComponent(token)}`, "POST", { signed_name, consent: true, signature_image }),
   declineSigning: (token: string, reason: string) => json<SigningView>(`/api/sign/${encodeURIComponent(token)}/decline`, "POST", { reason }),
+  ragStatus: () => request<RagStatus>("/api/ai/rag/status"),
+  ragReindex: () => json<{ queued: number }>("/api/ai/rag/reindex", "POST"),
+  askDocuments: (question: string) => json<PortfolioAnswer>("/api/ai/rag/ask", "POST", { question }),
   portfolioHistory: () => request<PortfolioAnswer[]>("/api/ai/portfolio"),
   askPortfolio: (question: string) => json<PortfolioAnswer>("/api/ai/portfolio", "POST", { question }),
   aiSearch: (query: string) => json<AiFilters>("/api/ai/search", "POST", { query }),

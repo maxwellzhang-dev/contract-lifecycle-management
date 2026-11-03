@@ -68,6 +68,23 @@ Notes:
 - Model output can be wrong. Quotes are shown so reviewers can check them, and nothing changes a contract until a person clicks.
 - Every AI review and comparison is recorded in the audit trail.
 
+### Document search with LightRAG (optional)
+
+The **AI assistant** page can also answer from the *text* of every contract document ("which contracts cap the supplier's liability, and at what level?"). It uses [LightRAG](https://github.com/HKUDS/LightRAG): each document is split into chunks, the model extracts entities and relationships (parties, clauses, amounts, dates) into a knowledge graph, and questions are answered from the graph plus vector search. Answers link to the contracts and show the passages they used. Switch between **Contract records** (exact figures from the database) and **Document text** (clauses across documents) above the question box.
+
+1. Install the extra packages: `.venv/bin/pip install -r backend/requirements-rag.txt` (Docker: `--build-arg INSTALL_RAG=1`).
+2. Deploy an embedding model in Azure OpenAI (for example `text-embedding-3-large`).
+3. Set `RAG_ENABLED=1`, `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` and `RAG_EMBEDDING_DIM` (3072 for `text-embedding-3-large`, 1536 for `text-embedding-3-small`), and restart the API.
+4. As an admin, open the AI assistant page, choose **Document text** and click **Rebuild index** to index existing contracts. New uploads, new versions and contracts created from templates are indexed automatically in the background. Deleted contracts are removed from the index.
+
+Notes:
+
+- Indexing calls the model several times per chunk, so it costs noticeably more tokens than the other AI features. `RAG_LLM_DEPLOYMENT` can point indexing and answers at a cheaper deployment than `AZURE_OPENAI_DEPLOYMENT`.
+- Scanned documents without a text layer are not indexed yet. They are listed on the page with the reason.
+- The index is stored in `RAG_DIR` (default `backend/data/rag`). For several API replicas, set `RAG_STORAGE=postgres` to use LightRAG's PostgreSQL storage. This needs the `pgvector` and Apache AGE extensions and LightRAG's `POSTGRES_*` variables, and has not been tested with Clause yet.
+- tiktoken downloads its tokenizer file on first use. In an environment without internet access, set `TIKTOKEN_CACHE_DIR` to a folder that already contains it (the Docker image does this at build time).
+- Changing the embedding model or dimension needs a fresh index: empty `RAG_DIR`, then rebuild.
+
 ## E-signature
 
 Approved contracts (`Cleared to Start` or `In Progress`) with a document can be sent for signature from the contract's **Signatures** tab.
@@ -131,10 +148,11 @@ Existing `contracts.db` files are upgraded automatically on start: new tables an
 | Data | Location / behaviour |
 | --- | --- |
 | Contract records | `backend/data/contracts.db` |
-| Uploaded files | `backend/data/uploads/` |
+| Uploaded files | `backend/data/uploads/` (signed copies too) |
+| Document search index (optional) | `backend/data/rag/`: chunks of document text, extracted entities and embeddings |
 | Azure configuration | Root `.env` file, excluded from Git |
 
-Contract files and structured data are stored locally. During AI extraction, document text or scanned pages are sent to the Azure OpenAI resource configured in `.env`. Upload only documents approved for processing by that resource.
+Contract files and structured data are stored locally. During AI extraction, AI review, questions and document indexing, document text or scanned pages are sent to the Azure OpenAI resource configured in `.env`. Upload only documents approved for processing by that resource.
 
 ## Local development
 

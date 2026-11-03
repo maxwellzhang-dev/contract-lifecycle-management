@@ -2,7 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { AlertTriangle, Check, MessageSquareText, Plus, Sparkles } from "lucide-react";
-import { api, can, type PortfolioAnswer, type AiComparison, type AiFilters, type AiQuestion, type AiReview, type Contract, type User, type Version } from "./api";
+import { api, can, type PortfolioAnswer, type RagStatus, type AiComparison, type AiFilters, type AiQuestion, type AiReview, type Contract, type User, type Version } from "./api";
 import { SectionHeader, Status, amountLabel, dateLabel, dateTimeLabel, errorText } from "./shared";
 import { emptyFilters, type Filters } from "./filters";
 
@@ -216,41 +216,78 @@ const portfolioExamples = [
   "Which contracts are waiting for finance approval?",
 ];
 
-/** Questions across the whole portfolio, answered from records, obligations, approvals and AI reviews. */
+const documentExamples = [
+  "Which contracts cap the supplier's liability, and at what level?",
+  "Which contracts allow termination for convenience, and with how much notice?",
+  "Where do we have data protection or confidentiality obligations?",
+];
+
+/** Questions across the whole portfolio: from records (structured) or from document text (LightRAG). */
 export function PortfolioView({ onOpen }: { onOpen: (contractId: number) => void }) {
   const [history, setHistory] = useState<PortfolioAnswer[]>([]);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [configured, setConfigured] = useState(true);
+  const [rag, setRag] = useState<RagStatus | null>(null);
+  const [source, setSource] = useState<"records" | "documents">("records");
+  const [ragTick, setRagTick] = useState(0);
   useEffect(() => {
     let cancelled = false;
     api.aiStatus().then(s => { if (!cancelled) setConfigured(s.configured); }).catch(() => undefined);
     api.portfolioHistory().then(h => { if (!cancelled) setHistory(h); }).catch(err => { if (!cancelled) setError(errorText(err, "Could not load history")); });
     return () => { cancelled = true; };
   }, []);
+  useEffect(() => {
+    let cancelled = false;
+    api.ragStatus().then(s => { if (!cancelled) setRag(s); }).catch(() => undefined);
+    return () => { cancelled = true; };
+  }, [ragTick]);
+  const pending = rag ? (rag.counts.Queued ?? 0) + (rag.counts.Indexing ?? 0) : 0;
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setTimeout(() => setRagTick(t => t + 1), 3000);
+    return () => window.clearTimeout(timer);
+  }, [pending, ragTick]);
+
   async function ask(text: string) {
     setBusy(true); setError("");
-    try { const item = await api.askPortfolio(text); setHistory([item, ...history]); setQuestion(""); }
+    try { const item = source === "documents" ? await api.askDocuments(text) : await api.askPortfolio(text); setHistory([item, ...history]); setQuestion(""); }
     catch (err) { setError(errorText(err, "Could not get an answer")); }
     finally { setBusy(false); }
   }
+  async function reindex() {
+    setError("");
+    try { await api.ragReindex(); setRagTick(t => t + 1); } catch (err) { setError(errorText(err, "Could not rebuild the index")); }
+  }
+  const examples = source === "documents" ? documentExamples : portfolioExamples;
   return <>
-    <SectionHeader eyebrow="AI ASSISTANT" title="Ask about your portfolio" copy="Answers come from contract records, obligations, approvals and the latest AI reviews — every contract it relies on is linked." />
+    <SectionHeader eyebrow="AI ASSISTANT" title="Ask about your portfolio" copy={source === "documents"
+      ? "Answers come from the text of the contract documents, searched with a knowledge graph (LightRAG). Every contract quoted is linked."
+      : "Answers come from contract records, obligations, approvals and the latest AI reviews — every contract it relies on is linked."} />
     {!configured && <p className="wf-hint warn">AI features are off: add the Azure OpenAI settings to <code>.env</code> and restart the API.</p>}
     <section className="panel portfolio-ask">
+      {rag?.enabled && <div className="portfolio-source" role="radiogroup" aria-label="Answer from">
+        <button role="radio" aria-checked={source === "records"} className={source === "records" ? "active" : ""} onClick={() => setSource("records")}>Contract records</button>
+        <button role="radio" aria-checked={source === "documents"} className={source === "documents" ? "active" : ""} onClick={() => setSource("documents")}>Document text</button>
+      </div>}
       <form className="ai-ask" onSubmit={e => { e.preventDefault(); void ask(question); }}>
-        <input value={question} maxLength={1000} onChange={e => setQuestion(e.target.value)} placeholder="e.g. Which contracts renew next quarter and who owns them?" aria-label="Portfolio question" />
+        <input value={question} maxLength={1000} onChange={e => setQuestion(e.target.value)} placeholder={source === "documents" ? "e.g. Which contracts have uncapped liability?" : "e.g. Which contracts renew next quarter and who owns them?"} aria-label="Portfolio question" />
         <button className="primary-button" disabled={busy || !question.trim() || !configured}>{busy ? "Thinking…" : "Ask"}</button>
       </form>
-      <div className="portfolio-examples">{portfolioExamples.map(example => <button key={example} className="wf-chip" disabled={busy || !configured} onClick={() => void ask(example)}>{example}</button>)}</div>
+      <div className="portfolio-examples">{examples.map(example => <button key={example} className="wf-chip" disabled={busy || !configured} onClick={() => void ask(example)}>{example}</button>)}</div>
+      {rag?.enabled && source === "documents" && <div className="rag-status">
+        <span>{rag.counts.Indexed ?? 0} of {rag.documents} document{rag.documents === 1 ? "" : "s"} indexed{pending ? ` · ${pending} in progress…` : ""}{rag.counts.Failed ? ` · ${rag.counts.Failed} could not be read` : ""}</span>
+        {rag.can_reindex && <button className="link-button" onClick={() => void reindex()}>Rebuild index</button>}
+        {rag.failed.length > 0 && <details><summary>Documents that could not be indexed</summary><ul>{rag.failed.map(f => <li key={f.contract_id}><button className="link-button" onClick={() => onOpen(f.contract_id)}>{f.title ?? `Contract #${f.contract_id}`}</button> — {f.error}</li>)}</ul></details>}
+      </div>}
       {error && <p className="form-error">{error}</p>}
     </section>
     <ul className="ai-answers portfolio-answers">{history.map(item => <li key={item.id} className="panel">
-      <p className="ai-q">{item.question}<small> — {dateTimeLabel(item.created_at)}</small></p>
+      <p className="ai-q"><span className={`source-badge ${item.source}`}>{item.source === "documents" ? "Documents" : "Records"}</span>{item.question}<small> — {dateTimeLabel(item.created_at)}</small></p>
       <p className={item.answer.found ? "ai-a" : "ai-a notfound"}>{item.answer.found ? "" : "Not answerable from the data: "}{item.answer.answer}</p>
       {item.answer.contracts.length > 0 && <div className="portfolio-refs">{item.answer.contracts.map(c => <button key={c.id} onClick={() => onOpen(c.id)}>
-        <div><strong>{c.title}</strong><small>{c.vendor_name ?? "Vendor not identified"} · {c.reason}</small></div><Status value={c.status} />
+        <div><strong>{c.title}</strong><small>{c.vendor_name ?? "Vendor not identified"} · {item.source === "documents" ? `“${c.reason}”` : c.reason}</small></div><Status value={c.status} />
       </button>)}</div>}
     </li>)}</ul>
     {history.length > 0 && <p className="wf-hint ai-disclaimer">AI output can be wrong. Open the linked contracts to check before acting.</p>}

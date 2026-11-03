@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from ..auth import current_user, require
 from ..database import add_audit, connection, rows_to_dicts, tag_match_sql, utc_now
+from ..services import rag
 from ..services.extraction import FIELDS, extract_contract
 from ..storage import save_upload, stored_file
 from ..workflow import (
@@ -256,6 +257,7 @@ def delete_contract(contract_id: int, user: dict = Depends(require("contract.del
         contract = load_contract(conn, contract_id)
         conn.execute("UPDATE audit_log SET contract_id=NULL WHERE contract_id=?", (contract_id,))
         conn.execute("DELETE FROM contracts WHERE id=?", (contract_id,))
+        rag.queue_delete(conn, contract_id)
         reference = contract["reference_number"] or f"Contract #{contract_id}"
         add_audit(
             conn, "Contract deleted", user["name"],
@@ -302,6 +304,7 @@ def upload_contract(
             (contract_id, 1, file.filename, file.content_type, str(destination), size, user["name"], now, "Original upload"),
         )
         add_audit(conn, "Contract uploaded", user["name"], contract_id, f"Uploaded {file.filename}")
+        rag.queue(conn, contract_id)
         add_audit(conn, "AI extraction completed", "Azure OpenAI", contract_id, extracted.get("extraction_note"))
         return contract_response(conn, contract_id)
 
@@ -460,6 +463,7 @@ def upload_version(
         )
         add_audit(conn, "New document version", user["name"], contract_id,
                   f"Version {version}: {file.filename}" + (f" — {note.strip()}" if note.strip() else ""))
+        rag.queue(conn, contract_id)
         return contract_response(conn, contract_id)
 
 

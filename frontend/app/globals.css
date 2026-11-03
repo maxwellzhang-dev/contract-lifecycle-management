@@ -707,3 +707,13 @@ nav .nav-item:nth-child(12) { --sec: var(--hue-indigo); --sec-bg: var(--hue-indi
 .sso-button:hover{background:#f6f7fa}
 .login-divider{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:13px}
 .login-divider::before,.login-divider::after{content:"";flex:1;height:1px;background:var(--line)}
+
+/* Portfolio assistant: records vs document text (LightRAG) */
+.portfolio-source{display:inline-flex;border:1px solid var(--line);border-radius:10px;padding:3px;background:#f6f7fa;justify-self:start;gap:2px}
+.portfolio-source button{border:0;background:none;padding:7px 14px;border-radius:8px;font-weight:600;font-size:14px;color:var(--muted);cursor:pointer}
+.portfolio-source button.active{background:#fff;color:#3f33c9;box-shadow:0 1px 3px #1f243022}
+.rag-status{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:13px;color:var(--muted)}
+.rag-status details{flex-basis:100%}
+.rag-status ul{margin:6px 0 0;padding-left:18px}
+.source-badge{display:inline-block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 7px;border-radius:6px;margin-right:8px;background:#eef0f3;color:#4b5565;vertical-align:1px}
+.source-badge.documents{background:#ece9ff;color:#3f33c9}

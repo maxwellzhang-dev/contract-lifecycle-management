@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .database import connection, init_db, is_postgres
 from .routers import ai, approvals, auth, comments, contracts, insights, obligations, signatures, sso, templates
+from .services import rag
 from .workflow import run_reminders
 
 log = logging.getLogger("clause")
@@ -48,7 +49,13 @@ async def lifespan(_: FastAPI):
     task = None
     if os.getenv("REMINDERS_ENABLED", "1") == "1":
         task = asyncio.create_task(reminder_loop(float(os.getenv("REMINDER_INTERVAL_HOURS", "6"))))
+    if rag.enabled():
+        try:
+            await asyncio.to_thread(rag.service.start)  # resumes any queued indexing
+        except Exception:
+            log.exception("Could not start document search (LightRAG)")
     yield
+    await asyncio.to_thread(rag.service.shutdown)
     if task:
         task.cancel()
         with suppress(asyncio.CancelledError):

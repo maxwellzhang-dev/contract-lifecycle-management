@@ -269,7 +269,8 @@ CREATE TABLE IF NOT EXISTS ai_portfolio_questions (
     user_id INTEGER NOT NULL REFERENCES users(id),
     question TEXT NOT NULL,
     answer TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    source TEXT NOT NULL DEFAULT 'records'
 );
 CREATE TABLE IF NOT EXISTS signature_requests (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -308,6 +309,14 @@ CREATE TABLE IF NOT EXISTS signature_signers (
 );
 CREATE INDEX IF NOT EXISTS idx_signature_contract ON signature_requests(contract_id);
 CREATE INDEX IF NOT EXISTS idx_signer_request ON signature_signers(request_id);
+CREATE TABLE IF NOT EXISTS rag_documents (
+    contract_id INTEGER PRIMARY KEY,
+    status TEXT NOT NULL,
+    indexed_doc_id TEXT,
+    document_version INTEGER,
+    error TEXT,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_ai_review_contract ON ai_reviews(contract_id);
 CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id);
 """
@@ -317,6 +326,7 @@ ADDED_COLUMNS = {
     "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT"},
     "approval_requests": {"ai_review_id": "INTEGER"},
     "users": {"sso_subject": "TEXT"},
+    "ai_portfolio_questions": {"source": "TEXT NOT NULL DEFAULT 'records'"},
 }
 
 
