@@ -16,8 +16,18 @@ export type User = {
   name: string;
   role: string;
   active: boolean;
+  department: string | null;
+  access_scope: AccessScope;
   permissions: Permission[];
 };
+
+export type AccessScope = "all" | "department" | "assigned";
+export const accessScopes: { value: AccessScope; label: string }[] = [
+  { value: "all", label: "All contracts" },
+  { value: "department", label: "Own department + involved" },
+  { value: "assigned", label: "Only contracts they're involved in" },
+];
+export type Member = { id: number; name: string; email: string; role: string; department: string | null; added_by: string | null; added_at: string };
 
 export type Contract = {
   id: number;
@@ -54,6 +64,7 @@ export type Contract = {
   uploaded_by?: string | null;
   document_version: number;
   signed_at?: string | null;
+  extraction_status?: "Queued" | "Running" | "Done" | "Failed" | null;
   tags: string[];
   pending_approval_id: number | null;
   allowed_transitions: string[];
@@ -315,6 +326,12 @@ export type SigningView = {
   can_sign: boolean;
 };
 
+export type Job = {
+  id: number; kind: string; label: string; status: "queued" | "running" | "done" | "failed";
+  attempts: number; max_attempts: number; run_after: string; last_error: string | null;
+  created_at: string; updated_at: string; contract_id: number | null; target: string | null;
+};
+
 export type DirectoryEntry = { id: number; name: string; role: string };
 
 /** Thrown for 401 responses so the app can return to the sign-in screen. */
@@ -430,7 +447,14 @@ export const api = {
 
   directory: () => request<DirectoryEntry[]>("/api/users/directory"),
   users: () => request<User[]>("/api/users"),
-  createUser: (values: { email: string; name: string; role: string; password: string }) => json<User>("/api/users", "POST", values),
+  jobs: (status = "") => request<{ counts: Partial<Record<Job["status"], number>>; items: Job[]; workers: number; mode: string }>(`/api/jobs${status ? `?status=${status}` : ""}`),
+  ocrStatus: () => request<{ configured: boolean; scanned_without_text: number }>("/api/ocr/status"),
+  ocrBackfill: () => json<{ queued: number }>("/api/ocr/backfill", "POST"),
+  retryJob: (id: number) => json<Job>(`/api/jobs/${id}/retry`, "POST"),
+  members: (id: number) => request<Member[]>(`/api/contracts/${id}/members`),
+  addMember: (id: number, user_id: number) => json<Member[]>(`/api/contracts/${id}/members`, "POST", { user_id }),
+  removeMember: (id: number, user_id: number) => request<Member[]>(`/api/contracts/${id}/members/${user_id}`, { method: "DELETE" }),
+  createUser: (values: { email: string; name: string; role: string; password: string; department?: string; access_scope?: AccessScope }) => json<User>("/api/users", "POST", values),
   updateUser: (id: number, values: Partial<User> & { password?: string }) => json<User>(`/api/users/${id}`, "PATCH", values),
 };
 

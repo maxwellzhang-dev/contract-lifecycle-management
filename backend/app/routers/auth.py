@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from ..auth import (
     SESSION_COOKIE, LoginRequest, PasswordChange, UserCreate, UserUpdate, create_session,
     current_user, delete_session, hash_password, public_user, request_token, require,
-    set_session_cookie, validate_password, validate_role, verify_password,
+    set_session_cookie, validate_password, validate_role, validate_scope, verify_password,
 )
 from ..database import add_audit, connection, utc_now
 from . import sso
@@ -75,16 +75,20 @@ def list_users(_: dict = Depends(require("user.manage"))):
 def create_user(body: UserCreate, admin: dict = Depends(require("user.manage"))):
     validate_role(body.role)
     validate_password(body.password)
+    validate_scope(body.access_scope, body.department)
     if "@" not in body.email or not body.name.strip():
         raise HTTPException(422, "A name and a valid email are required.")
     with connection() as conn:
         if conn.execute("SELECT 1 FROM users WHERE lower(email)=lower(?)", (body.email.strip(),)).fetchone():
             raise HTTPException(409, "A user with this email already exists.")
         cursor = conn.execute(
-            "INSERT INTO users (email, name, role, password_hash, active, created_at) VALUES (?,?,?,?,1,?)",
-            (body.email.strip(), body.name.strip(), body.role, hash_password(body.password), utc_now()),
+            "INSERT INTO users (email, name, role, password_hash, active, created_at, department, access_scope) VALUES (?,?,?,?,1,?,?,?)",
+            (body.email.strip(), body.name.strip(), body.role, hash_password(body.password), utc_now(),
+             (body.department or "").strip() or None, body.access_scope),
         )
-        add_audit(conn, "User created", admin["name"], details=f"{body.name} ({body.email}) as {body.role}")
+        add_audit(conn, "User created", admin["name"],
+                  details=f"{body.name} ({body.email}) as {body.role}, sees {body.access_scope}"
+                          + (f" ({body.department.strip()})" if body.access_scope == "department" else ""))
         row = conn.execute("SELECT * FROM users WHERE id=?", (cursor.lastrowid,)).fetchone()
     return public_user(row)
 
@@ -109,6 +113,14 @@ def update_user(user_id: int, body: UserUpdate, admin: dict = Depends(require("u
         if "active" in changes:
             conn.execute("UPDATE users SET active=? WHERE id=?", (int(bool(changes["active"])), user_id))
             notes.append("reactivated" if changes["active"] else "deactivated")
+        if "department" in changes or "access_scope" in changes:
+            department = ((changes["department"] or "").strip() or None) if "department" in changes else row["department"]
+            scope = changes.get("access_scope") or row["access_scope"] or "all"
+            validate_scope(scope, department)
+            conn.execute("UPDATE users SET department=?, access_scope=? WHERE id=?", (department, scope, user_id))
+            if department != row["department"] or scope != (row["access_scope"] or "all"):
+                notes.append(f"access: {row['access_scope'] or 'all'}{' (' + row['department'] + ')' if row['department'] else ''}"
+                             f" → {scope}{' (' + department + ')' if department else ''}")
         if changes.get("password"):
             validate_password(changes["password"])
             conn.execute("UPDATE users SET password_hash=? WHERE id=?", (hash_password(changes["password"]), user_id))

@@ -717,3 +717,27 @@ nav .nav-item:nth-child(12) { --sec: var(--hue-indigo); --sec-bg: var(--hue-indi
 .rag-status ul{margin:6px 0 0;padding-left:18px}
 .source-badge{display:inline-block;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:2px 7px;border-radius:6px;margin-right:8px;background:#eef0f3;color:#4b5565;vertical-align:1px}
 .source-badge.documents{background:#ece9ff;color:#3f33c9}
+
+/* Contract access */
+.sharing-card{margin-top:18px}
+.sharing-list{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.sharing-list li{display:flex;align-items:center;gap:10px}
+.sharing-list li>div{flex:1;min-width:0}
+.sharing-list small{display:block;color:var(--muted);font-size:12px}
+.sharing-add{display:flex;gap:8px}
+.sharing-add select{flex:1;min-width:0;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;background:#fff}
+.sharing-add .secondary-button{display:inline-flex;align-items:center;gap:6px}
+.wf-hint.extracting{display:flex;align-items:center;gap:10px;background:#f3f1ff;color:#3f33c9;border:1px solid #dcd6ff;border-radius:8px;padding:9px 12px;margin-bottom:12px}
+.wf-hint.extracting .spinner{border-color:#c9c4ff;border-top-color:#5b4ff5}
+
+/* Background jobs */
+.jobs-panel{margin-top:18px}
+.jobs-filter{display:flex;flex-wrap:wrap;gap:6px}
+.jobs-filter button{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 12px;font-size:13px;font-weight:600;color:var(--muted);cursor:pointer}
+.jobs-filter button.active{border-color:#c9c4ff;background:#f3f1ff;color:#3f33c9}
+.job-status{flex:0 0 auto;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;padding:3px 8px;border-radius:6px;background:#eef0f3;color:#4b5565}
+.job-status.done{background:#e9f8ef;color:#166534}
+.job-status.failed{background:#ffe4e9;color:#be123c}
+.job-status.running{background:#f3f1ff;color:#3f33c9}
+.job-status.queued{background:#fff1d6;color:#a15c07}
+.job-error{margin:4px 0 0;font-size:12px;color:#be123c;font-family:var(--font-geist-mono),monospace;word-break:break-word}

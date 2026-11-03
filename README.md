@@ -80,7 +80,7 @@ The **AI assistant** page can also answer from the *text* of every contract docu
 Notes:
 
 - Indexing calls the model several times per chunk, so it costs noticeably more tokens than the other AI features. `RAG_LLM_DEPLOYMENT` can point indexing and answers at a cheaper deployment than `AZURE_OPENAI_DEPLOYMENT`.
-- Scanned documents without a text layer are not indexed yet. They are listed on the page with the reason.
+- Scanned documents are indexed once OCR has read them (see Background jobs → OCR). Without OCR they are listed on the page as unreadable.
 - The index is stored in `RAG_DIR` (default `backend/data/rag`). For several API replicas, set `RAG_STORAGE=postgres` to use LightRAG's PostgreSQL storage. This needs the `pgvector` and Apache AGE extensions and LightRAG's `POSTGRES_*` variables, and has not been tested with Clause yet.
 - tiktoken downloads its tokenizer file on first use. In an environment without internet access, set `TIKTOKEN_CACHE_DIR` to a folder that already contains it (the Docker image does this at build time).
 - Changing the embedding model or dimension needs a fresh index: empty `RAG_DIR`, then rebuild.
@@ -118,6 +118,49 @@ Clause supports sign-in with Microsoft Entra ID (or any OpenID Connect provider)
 | `PASSWORD_LOGIN` | `0` hides password sign-in once SSO works |
 
 Users are matched by their Entra object ID, then by email, so existing accounts keep their history. Deactivated users cannot sign in, and a role change from Entra ends the user's other sessions.
+
+## Background jobs
+
+Slow or unreliable work runs as background jobs, stored in the database with the change that needs them:
+
+- **AI extraction**: an upload returns at once and the contract opens straight away. The details fill in on their own when the AI has read the document; validation waits until then. Anything typed in the meantime is kept.
+- **Emails**: a short SMTP outage no longer loses messages.
+- **AI review for approvers** after a contract is submitted.
+
+Each job is retried with growing pauses (30 s, 1 min, 2 min, …). After its last attempt, extraction falls back to simple local rules so the contract is never stuck. Jobs left running by a crashed process are picked up again after 15 minutes. Jobs are claimed atomically, so several API replicas on PostgreSQL never run the same job twice. Admins can watch jobs and retry failed ones under **Users & roles → Background jobs**.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `JOBS_ENABLED` | `1` | Run job workers in this API process. Set `0` on replicas that should only serve requests. |
+| `JOB_WORKERS` | `2` | Worker threads per process |
+| `JOB_POLL_SECONDS` | `2` | How often idle workers look for due jobs (new jobs wake them at once) |
+
+The LightRAG document index keeps its own queue (see above).
+
+### OCR for scanned documents
+
+Scanned PDFs and images have no text layer, so the AI only saw images of their first pages, and review, questions, comparison and document search had little to work with. With [Azure AI Document Intelligence](https://learn.microsoft.com/azure/ai-services/document-intelligence/) configured, each scanned upload or new version is read first (the `prebuilt-read` model, all pages). The text is kept next to the file and used everywhere the document's text is needed. Extraction and indexing run after OCR. If OCR fails, extraction still runs from page images.
+
+1. Create a Document Intelligence resource in Azure.
+2. Set `AZURE_DOCINTEL_ENDPOINT` and `AZURE_DOCINTEL_KEY` (optionally `AZURE_DOCINTEL_MODEL`, default `prebuilt-read`) and restart the API.
+3. To read documents uploaded before OCR was on, click **Read them now** under **Users & roles → Background jobs**.
+
+During OCR, scanned documents are sent to that Document Intelligence resource.
+
+## Who can see which contracts
+
+Roles decide what people can *do*. Each user's **Can see** setting (Users page) decides which contracts they *see*:
+
+| Setting | Sees |
+| --- | --- |
+| All contracts (default) | Every contract. Admins always see everything. |
+| Own department + involved | Contracts whose department matches theirs (case-insensitive), plus the ones they are involved in |
+| Only contracts they're involved in | Contracts where they are the owner or renewal owner, uploaded it, submitted or decided an approval, have an approval step waiting for their role, are a signer, or were added as a member |
+
+- Anyone who can edit contracts can share a contract with extra people from **Details → Who can see this contract**. The person is notified.
+- Contracts a user cannot see are hidden everywhere: lists, dashboard, vendors, reports, exports, obligations, audit trail, AI answers and @mention notifications. Opening one directly returns "not found".
+- Document search (LightRAG) spans every document, so it is only offered to users who see all contracts.
+- New single sign-on accounts get `SSO_DEFAULT_ACCESS_SCOPE` (default `all`). With `department`, Clause uses the Entra `department` claim when it is present (add it as an optional claim in the app registration).
 
 ## Roles
 
@@ -234,6 +277,5 @@ Azure Container Apps deployment guidance is available in [docs/azure-container-a
 - Accounts can sign in with a password or with Microsoft Entra ID. There is no multi-factor authentication for password accounts; use Entra ID (with its MFA policies) and `PASSWORD_LOGIN=0` in production.
 - SQLite suits a single machine. Use PostgreSQL (`DATABASE_URL`) for production and for more than one API replica.
 - E-signature is a simple electronic signature with an audit trail and certificate, not a qualified or certificate-based digital signature.
-- AI extraction runs synchronously during upload. Production use should move extraction to a reliable background job queue.
 - Reminders run inside the API process. They are de-duplicated in the database, so several replicas on PostgreSQL do not send duplicates; you can still run them from one scheduled job instead (`REMINDERS_ENABLED=0` on the replicas).
 - DOCX preview renders readable paragraphs and tables; it is not a pixel-perfect representation of Word page layout.

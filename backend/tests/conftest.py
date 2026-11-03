@@ -11,6 +11,7 @@ def app_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DATABASE_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))
     monkeypatch.setenv("REMINDERS_ENABLED", "0")
+    monkeypatch.setenv("JOBS_MODE", "inline")  # background jobs run as soon as their transaction commits
     monkeypatch.setenv("SEED_DEMO_DATA", "0")
     monkeypatch.setenv("CLAUSE_SEED_PASSWORD", PASSWORD)
     monkeypatch.delenv("SMTP_HOST", raising=False)
@@ -27,7 +28,7 @@ def app_env(tmp_path, monkeypatch):
 
     from backend.app.routers import contracts
 
-    def fake_extract(path):
+    def fake_extract(path, **kwargs):
         return {
             "title": "Cloud Hosting Agreement", "vendor_name": "Acme Cloud", "currency": "SGD",
             "one_time_amount": 120000, "project_start_date": "2026-01-01", "project_end_date": "2026-12-31",

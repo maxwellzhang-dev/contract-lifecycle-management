@@ -9,8 +9,10 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from ..access import sees_everything, visibility_sql, visible_ids
 from ..auth import current_user, require
 from ..database import add_audit, connection, utc_now
+from .. import jobs
 from ..services import llm, rag
 from ..services.extraction import extract_text_and_images
 from ..storage import stored_file
@@ -211,18 +213,29 @@ def auto_review_enabled() -> bool:
     return llm.configured() and os.getenv("AI_REVIEW_ON_SUBMIT", "1") == "1"
 
 
-def review_for_approval(request_id: int, contract_id: int):
-    """Background task after submission: make sure approvers see an AI review of the submitted version."""
-    try:
-        review = generate_review(contract_id, "Clause AI")
-    except Exception as exc:  # the approval itself must never fail because the AI did
-        log.warning("Automatic AI review for contract %s failed: %s", contract_id, exc)
-        with connection() as conn:
-            add_audit(conn, "AI review failed", "Clause AI", contract_id, str(exc)[:300])
-        return
+def review_for_approval(payload: dict, attempt: int):
+    """Job after submission: make sure approvers see an AI review of the submitted version."""
+    review = generate_review(payload["contract_id"], "Clause AI")
     with connection() as conn:
         conn.execute("UPDATE approval_requests SET ai_review_id=? WHERE id=? AND ai_review_id IS NULL",
-                     (review["id"], request_id))
+                     (review["id"], payload["request_id"]))
+
+
+def review_for_approval_failed(payload: dict, error: str):
+    # The approval itself never depends on the AI.
+    log.warning("Automatic AI review for contract %s failed: %s", payload["contract_id"], error)
+    with connection() as conn:
+        add_audit(conn, "AI review failed", "Clause AI", payload["contract_id"], error[:300])
+
+
+jobs.handler("ai_review", max_attempts=3, on_failure=review_for_approval_failed)(review_for_approval)
+
+
+def review_job_pending(conn, request_id: int) -> bool:
+    return conn.execute(
+        "SELECT 1 FROM jobs WHERE kind='ai_review' AND status IN ('queued','running') AND payload LIKE ?",
+        (f'{{"request_id": {int(request_id)},%',),
+    ).fetchone() is not None
 
 
 @router.post("/contracts/{contract_id}/ai/review", status_code=201)
@@ -295,10 +308,13 @@ def compare(contract_id: int, body: CompareIn, user: dict = Depends(require("ai.
     return {"from_version": body.from_version, "to_version": body.to_version, **result}
 
 
-def known_values(conn) -> dict[str, list[str]]:
+def known_values(conn, user: dict) -> dict[str, list[str]]:
+    vis, vparams = visibility_sql(user, "contracts")
+
     def distinct(column):
-        return [r[0] for r in conn.execute(f"SELECT DISTINCT {column} FROM contracts WHERE {column} IS NOT NULL ORDER BY 1")]
-    tags = sorted({t for (raw,) in conn.execute("SELECT tags FROM contracts") for t in json.loads(raw or "[]")})
+        return [r[0] for r in conn.execute(
+            f"SELECT DISTINCT {column} FROM contracts WHERE {column} IS NOT NULL AND {vis} ORDER BY 1", vparams)]
+    tags = sorted({t for (raw,) in conn.execute(f"SELECT tags FROM contracts WHERE {vis}", vparams) for t in json.loads(raw or "[]")})
     return {"vendor": distinct("vendor_name"), "department": distinct("department"), "owner": distinct("owner"),
             "currency": distinct("currency"), "tag": tags}
 
@@ -309,7 +325,7 @@ def natural_search(body: SearchIn, user: dict = Depends(require("ai.use"))):
     if not query or len(query) > 500:
         raise HTTPException(422, "Describe the contracts you are looking for (up to 500 characters).")
     with connection() as conn:
-        known = known_values(conn)
+        known = known_values(conn, user)
     prompt = (f"TODAY: {date.today().isoformat()}\nKNOWN VALUES\n"
               + "\n".join(f"{k}: {json.dumps(v)}" for k, v in known.items()) + f"\n\nREQUEST\n{query}")
     result = call(SEARCH_PROMPT, prompt, "contract_filters", SEARCH_SCHEMA)
@@ -340,9 +356,11 @@ reason. Set found=false when the tables cannot answer the question, and say what
 PORTFOLIO_LIMIT = 400
 
 
-def portfolio_material(conn) -> str:
+def portfolio_material(conn, user: dict) -> str:
+    vis, vparams = visibility_sql(user, "contracts")
     contracts = conn.execute(
-        f"SELECT * FROM contracts ORDER BY updated_at DESC LIMIT {PORTFOLIO_LIMIT}").fetchall()
+        f"SELECT * FROM contracts WHERE {vis} ORDER BY updated_at DESC LIMIT {PORTFOLIO_LIMIT}", vparams).fetchall()
+    allowed = {c["id"] for c in contracts}
     reviews = {}
     for row in conn.execute("SELECT contract_id, result FROM ai_reviews ORDER BY id"):
         reviews[row["contract_id"]] = json.loads(row["result"])  # later rows win: latest review
@@ -360,6 +378,8 @@ def portfolio_material(conn) -> str:
         lines.append(" | ".join("" if v is None else str(v).replace("\n", " ").replace("|", "/") for v in cells))
     lines.append("\nOBLIGATIONS: contract #id | title | kind | status | due date | amount | currency | owner")
     for o in conn.execute("SELECT * FROM obligations ORDER BY due_date"):
+        if o["contract_id"] not in allowed:
+            continue
         cells = [f"#{o['contract_id']}", o["title"], o["kind"], o["status"], o["due_date"], o["amount"], o["currency"], o["owner"]]
         lines.append(" | ".join("" if v is None else str(v).replace("|", "/") for v in cells))
     lines.append("\nAPPROVALS: contract #id | status | submitted at | current step")
@@ -367,13 +387,16 @@ def portfolio_material(conn) -> str:
         """SELECT r.contract_id, r.status, r.submitted_at,
                   (SELECT role FROM approval_steps s WHERE s.request_id=r.id AND s.status='Pending' LIMIT 1) step
            FROM approval_requests r ORDER BY r.id DESC LIMIT 200"""):
+        if a["contract_id"] not in allowed:
+            continue
         lines.append(f"#{a['contract_id']} | {a['status']} | {a['submitted_at'][:10]} | {a['step'] or ''}")
     return "\n".join(lines)
 
 
-def portfolio_out(conn, row) -> dict:
+def portfolio_out(conn, row, user: dict) -> dict:
     answer = json.loads(row["answer"])
-    ids = [item["id"] for item in answer.get("contracts", [])]
+    visible = visible_ids(conn, user)
+    ids = [item["id"] for item in answer.get("contracts", []) if visible is None or item["id"] in visible]
     titles = {}
     if ids:
         marks = ",".join("?" * len(ids))
@@ -395,7 +418,7 @@ def portfolio_history(user: dict = Depends(require("ai.use"))):
                WHERE q.user_id=? ORDER BY q.id DESC LIMIT 30""",
             (user["id"],),
         ).fetchall()
-        return [portfolio_out(conn, row) for row in rows]
+        return [portfolio_out(conn, row, user) for row in rows]
 
 
 @router.post("/ai/portfolio", status_code=201)
@@ -406,7 +429,7 @@ def ask_portfolio(body: QuestionIn, user: dict = Depends(require("ai.use"))):
     if len(question) > MAX_QUESTION:
         raise HTTPException(422, f"Questions are limited to {MAX_QUESTION} characters.")
     with connection() as conn:
-        material = portfolio_material(conn)
+        material = portfolio_material(conn, user)
     answer = call(PORTFOLIO_PROMPT, f"TODAY: {date.today().isoformat()}\n\n{material}\n\nQUESTION\n{question}",
                   "portfolio_answer", PORTFOLIO_SCHEMA, effort="medium")
     with connection() as conn:
@@ -417,7 +440,7 @@ def ask_portfolio(body: QuestionIn, user: dict = Depends(require("ai.use"))):
         row = conn.execute(
             """SELECT q.*, u.name asked_by FROM ai_portfolio_questions q JOIN users u ON u.id=q.user_id
                WHERE q.id=?""", (cursor.lastrowid,)).fetchone()
-        return portfolio_out(conn, row)
+        return portfolio_out(conn, row, user)
 
 
 # --- document search with LightRAG (optional) ----------------------------------------
@@ -437,7 +460,10 @@ def rag_status(user: dict = Depends(require("ai.use"))):
         failed = [dict(r) for r in conn.execute(
             """SELECT d.contract_id, c.title, d.error FROM rag_documents d LEFT JOIN contracts c ON c.id=d.contract_id
                WHERE d.status='Failed' ORDER BY d.updated_at DESC LIMIT 10""")]
-    return {"enabled": reason is None, "reason": reason, "documents": documents, "counts": counts, "failed": failed,
+    restricted = not sees_everything(user)
+    return {"enabled": reason is None and not restricted,
+            "reason": "Document search is available to users who can see all contracts." if restricted and reason is None else reason,
+            "documents": documents, "counts": counts, "failed": [] if restricted else failed,
             "can_reindex": "user.manage" in user["permissions"]}
 
 
@@ -478,6 +504,9 @@ def rag_ask(body: QuestionIn, user: dict = Depends(require("ai.use"))):
         raise HTTPException(422, f"Questions are limited to {MAX_QUESTION} characters.")
     if not rag.enabled():
         raise HTTPException(503, rag.status_reason())
+    if not sees_everything(user):
+        # The document index spans every contract and cannot yet be limited per user.
+        raise HTTPException(403, "Document search is available to users who can see all contracts.")
     result = rag_query(question)
     if result.get("status") not in (None, "success"):
         raise HTTPException(503, f"Document search failed: {result.get('message', 'unknown error')}")
@@ -508,4 +537,4 @@ def rag_ask(body: QuestionIn, user: dict = Depends(require("ai.use"))):
         row = conn.execute(
             """SELECT q.*, u.name asked_by FROM ai_portfolio_questions q JOIN users u ON u.id=q.user_id
                WHERE q.id=?""", (cursor.lastrowid,)).fetchone()
-        return portfolio_out(conn, row)
+        return portfolio_out(conn, row, user)

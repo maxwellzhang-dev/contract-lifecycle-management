@@ -3,7 +3,8 @@ import re
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..auth import current_user
+from ..access import can_view
+from ..auth import current_user, public_user
 from ..database import add_audit, connection, utc_now
 from ..workflow import notify
 
@@ -63,6 +64,8 @@ def add_comment(contract_id: int, body: CommentIn, user: dict = Depends(current_
             (contract_id, user["id"], text, utc_now()),
         )
         mentions = [m for m in mentioned_users(conn, text) if m["id"] != user["id"]]
+        # Only people who can see the contract are notified; mentioning does not share it.
+        mentions = [m for m in mentions if can_view(conn, public_user(conn.execute("SELECT * FROM users WHERE id=?", (m["id"],)).fetchone()), contract_id)]
         notify(conn, [m["id"] for m in mentions], "mention", f"{user['name']} mentioned you on {contract['title']}",
                text[:280], contract_id)
         add_audit(conn, "Comment added", user["name"], contract_id,

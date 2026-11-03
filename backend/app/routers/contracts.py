@@ -10,9 +10,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+from ..access import visibility_sql
 from ..auth import current_user, require
 from ..database import add_audit, connection, rows_to_dicts, tag_match_sql, utc_now
-from ..services import rag
+from .. import jobs
+from ..services import ocr, rag
 from ..services.extraction import FIELDS, extract_contract
 from ..storage import save_upload, stored_file
 from ..workflow import (
@@ -102,13 +104,15 @@ def contract_response(conn, contract_id: int) -> dict:
 
 
 @router.get("/dashboard")
-def dashboard(months: int = Query(12), _: dict = Depends(current_user)):
+def dashboard(months: int = Query(12), user: dict = Depends(current_user)):
     if months not in {1, 3, 6, 12}:
         raise HTTPException(422, "months must be one of 1, 3, 6 or 12")
     today = date.today().isoformat()
     cutoff = (date.today() + timedelta(days=30)).isoformat()
     period_start = (date.today() - timedelta(days={1: 31, 3: 92, 6: 183, 12: 366}[months])).isoformat()
-    in_period = "COALESCE(project_start_date, substr(created_at,1,10)) BETWEEN ? AND ?"
+    vis, vparams = visibility_sql(user, "contracts")
+    # Every query below is limited to the contracts this user may see.
+    in_period = f"COALESCE(project_start_date, substr(created_at,1,10)) BETWEEN ? AND ? AND {vis}"
     with connection() as conn:
         totals = conn.execute(
             f"""SELECT COUNT(*) total,
@@ -120,32 +124,36 @@ def dashboard(months: int = Query(12), _: dict = Depends(current_user)):
                 COALESCE(SUM(CASE WHEN validation_status!='Validated' THEN 1 ELSE 0 END),0) awaiting_validation,
                 COALESCE(SUM(CASE WHEN missing_fields!='[]' THEN 1 ELSE 0 END),0) missing_information
                 FROM contracts WHERE {in_period}""",
-            (today, period_start, today),
+            (today, period_start, today, *vparams),
         ).fetchone()
         expiring = conn.execute(
             f"SELECT COUNT(*) FROM contracts WHERE {in_period} AND project_end_date BETWEEN ? AND ?",
-            (period_start, today, today, cutoff),
+            (period_start, today, *vparams, today, cutoff),
         ).fetchone()[0]
         values = rows_to_dicts(conn.execute(
             f"""SELECT currency, ROUND(SUM(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0)),2) value
                FROM contracts WHERE {in_period} GROUP BY currency ORDER BY value DESC""",
-            (period_start, today),
+            (period_start, today, *vparams),
         ).fetchall())
         total_values = rows_to_dicts(conn.execute(
-            """SELECT currency, ROUND(SUM(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0)),2) value
-               FROM contracts WHERE currency IS NOT NULL GROUP BY currency ORDER BY value DESC""",
+            f"""SELECT currency, ROUND(SUM(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0)),2) value
+               FROM contracts WHERE currency IS NOT NULL AND {vis} GROUP BY currency ORDER BY value DESC""",
+            vparams,
         ).fetchall())
         statuses = rows_to_dicts(conn.execute(
             f"SELECT status, COUNT(*) count FROM contracts WHERE {in_period} GROUP BY status ORDER BY count DESC",
-            (period_start, today),
+            (period_start, today, *vparams),
         ).fetchall())
-        pending_approvals = conn.execute("SELECT COUNT(*) FROM approval_requests WHERE status='Pending'").fetchone()[0]
+        cvis, cparams = visibility_sql(user, "c")
+        pending_approvals = conn.execute(
+            f"SELECT COUNT(*) FROM approval_requests r JOIN contracts c ON c.id=r.contract_id WHERE r.status='Pending' AND {cvis}",
+            cparams).fetchone()[0]
         obligations = conn.execute(
-            """SELECT COALESCE(SUM(CASE WHEN o.due_date < ? THEN 1 ELSE 0 END),0) overdue,
+            f"""SELECT COALESCE(SUM(CASE WHEN o.due_date < ? THEN 1 ELSE 0 END),0) overdue,
                       COALESCE(SUM(CASE WHEN o.due_date BETWEEN ? AND ? THEN 1 ELSE 0 END),0) due_30
                FROM obligations o JOIN contracts c ON c.id=o.contract_id
-               WHERE o.status='Open' AND c.status NOT IN ('Completed','Cancelled')""",
-            (today, today, cutoff),
+               WHERE o.status='Open' AND c.status NOT IN ('Completed','Cancelled') AND {cvis}""",
+            (today, today, cutoff, *cparams),
         ).fetchone()
     return {
         **dict(totals), "expiring_30_days": expiring, "value_by_currency": values,
@@ -159,8 +167,12 @@ TOTAL_VALUE = "(COALESCE(one_time_amount,0)+COALESCE(optional_amount,0))"
 
 
 def query_contracts(search="", status="", vendor="", department="", limit=100, owner="", tag="",
-                    currency="", min_value=None, max_value=None, end_from="", end_to=""):
+                    currency="", min_value=None, max_value=None, end_from="", end_to="", user: dict | None = None):
     clauses, params = [], []
+    if user is not None:
+        vis, vparams = visibility_sql(user, "contracts")
+        clauses.append(vis)
+        params.extend(vparams)
     if search:
         clauses.append("(title LIKE ? OR vendor_name LIKE ? OR project_name LIKE ? OR reference_number LIKE ? OR owner LIKE ? OR tags LIKE ?)")
         params.extend([f"%{search}%"] * 6)
@@ -204,9 +216,9 @@ class ContractFilters:
 
 @router.get("/contracts")
 def list_contracts(
-    filters: ContractFilters = Depends(), limit: int = Query(100, ge=1, le=1000), _: dict = Depends(current_user),
+    filters: ContractFilters = Depends(), limit: int = Query(100, ge=1, le=1000), user: dict = Depends(current_user),
 ):
-    return query_contracts(limit=limit, **filters.values)
+    return query_contracts(limit=limit, user=user, **filters.values)
 
 
 @router.get("/contracts/{contract_id}")
@@ -273,29 +285,20 @@ def upload_contract(
     related_project: str = Form(""),
     user: dict = Depends(require("contract.create")),
 ):
+    """Store the document and create the contract now; AI extraction runs as a background job."""
     destination = save_upload(file)
-    extracted = extract_contract(destination)
     now = utc_now()
-    extracted["title"] = extracted.get("title") or Path(file.filename or "Untitled contract").stem
-    # New uploads always start at Quoting: Under Review and later are reached through approvals.
-    extracted["status"] = "Quoting"
-    extracted["vendor_name"] = extracted.get("vendor_name") or related_vendor or None
-    extracted["project_name"] = extracted.get("project_name") or related_project or None
-    columns = FIELDS + ["extraction_confidence", "missing_fields", "low_confidence_fields", "field_confidences", "extraction_note"]
-    values = []
-    for column in columns:
-        value = extracted.get(column)
-        if column in {"missing_fields", "low_confidence_fields", "field_confidences"}:
-            value = json.dumps(value or ([] if column != "field_confidences" else {}))
-        values.append(value)
+    title = Path(file.filename or "Untitled contract").stem
     size = destination.stat().st_size
     with connection() as conn:
         cursor = conn.execute(
-            f"""INSERT INTO contracts ({','.join(columns)}, file_name, file_type, file_path, file_size,
-                document_version, uploaded_by, upload_date, validation_status, created_at, updated_at)
-                VALUES ({','.join(['?'] * len(columns))},?,?,?,?,?,?,?,?,?,?)""",
-            (*values, file.filename, file.content_type, str(destination), size,
-             1, user["name"], now, "Pending", now, now),
+            """INSERT INTO contracts (title, vendor_name, project_name, status, file_name, file_type, file_path, file_size,
+                document_version, uploaded_by, upload_date, validation_status, extraction_status, extraction_note,
+                created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (title, related_vendor.strip() or None, related_project.strip() or None, "Quoting", file.filename,
+             file.content_type, str(destination), size, 1, user["name"], now, "Pending", "Queued",
+             "AI extraction is queued", now, now),
         )
         contract_id = cursor.lastrowid
         conn.execute(
@@ -304,9 +307,107 @@ def upload_contract(
             (contract_id, 1, file.filename, file.content_type, str(destination), size, user["name"], now, "Original upload"),
         )
         add_audit(conn, "Contract uploaded", user["name"], contract_id, f"Uploaded {file.filename}")
-        rag.queue(conn, contract_id)
-        add_audit(conn, "AI extraction completed", "Azure OpenAI", contract_id, extracted.get("extraction_note"))
+        if ocr.configured() and ocr.needs_ocr(destination):
+            # Scanned: read the pages first; the OCR job then queues extraction and indexing.
+            conn.execute("UPDATE contracts SET extraction_note=? WHERE id=?", ("Reading scanned pages (OCR) is queued", contract_id))
+            jobs.enqueue(conn, "ocr", {"contract_id": contract_id, "file_path": str(destination), "then_extract": True,
+                                       "placeholder_title": title})
+        else:
+            jobs.enqueue(conn, "extract", {"contract_id": contract_id, "placeholder_title": title})
+            rag.queue(conn, contract_id)
+    with connection() as conn:  # in inline mode the extraction has already run
         return contract_response(conn, contract_id)
+
+
+EXTRACTION_ATTEMPTS = 4
+
+
+def apply_extraction(contract_id: int, extracted: dict, placeholder_title: str | None):
+    """Fill the contract from an extraction result without overwriting anything a person entered meanwhile."""
+    with connection() as conn:
+        contract = conn.execute("SELECT * FROM contracts WHERE id=?", (contract_id,)).fetchone()
+        if not contract:
+            return
+        updates = {}
+        for field in FIELDS:
+            if field == "status":  # new uploads always start at Quoting; approvals move them on
+                continue
+            value = extracted.get(field)
+            current = contract[field]
+            empty = current in (None, "") or (field == "title" and current == placeholder_title)
+            if value not in (None, "") and empty:
+                updates[field] = value
+        merged = {field: updates.get(field, contract[field]) for field in FIELDS}
+        filled_by_ai = set(updates)
+        missing = [f for f in extracted.get("missing_fields") or [] if f in FIELDS and merged.get(f) in (None, "")]
+        low = [f for f in extracted.get("low_confidence_fields") or [] if f in filled_by_ai]
+        confidences = {k: v for k, v in (extracted.get("field_confidences") or {}).items() if k in filled_by_ai}
+        updates.update({
+            "extraction_confidence": extracted.get("extraction_confidence"), "missing_fields": json.dumps(missing),
+            "low_confidence_fields": json.dumps(low), "field_confidences": json.dumps(confidences),
+            "extraction_note": extracted.get("extraction_note"), "extraction_status": "Done", "updated_at": utc_now(),
+        })
+        conn.execute(f"UPDATE contracts SET {', '.join(f'{k}=?' for k in updates)} WHERE id=?", (*updates.values(), contract_id))
+        add_audit(conn, "AI extraction completed", "Azure OpenAI", contract_id, extracted.get("extraction_note"))
+
+
+def extraction_job(payload: dict, attempt: int):
+    contract_id = payload["contract_id"]
+    with connection() as conn:
+        contract = conn.execute("SELECT file_path FROM contracts WHERE id=?", (contract_id,)).fetchone()
+        if not contract:
+            return  # deleted meanwhile
+        conn.execute("UPDATE contracts SET extraction_status='Running', extraction_note=? WHERE id=?",
+                     (f"AI extraction is running (attempt {attempt})", contract_id))
+    final = attempt >= EXTRACTION_ATTEMPTS or jobs.mode() == "inline"
+    extracted = extract_contract(stored_file(contract["file_path"]), allow_fallback=final)
+    apply_extraction(contract_id, extracted, payload.get("placeholder_title"))
+
+
+def extraction_failed(payload: dict, error: str):
+    with connection() as conn:
+        conn.execute("UPDATE contracts SET extraction_status='Failed', extraction_note=? WHERE id=?",
+                     (f"AI extraction failed: {error[:300]}. Enter the details by hand.", payload["contract_id"]))
+        add_audit(conn, "AI extraction failed", "System", payload["contract_id"], error[:300])
+
+
+jobs.handler("extract", max_attempts=EXTRACTION_ATTEMPTS, on_failure=extraction_failed)(extraction_job)
+
+
+def ocr_job(payload: dict, attempt: int):
+    contract_id = payload.get("contract_id")
+    path = stored_file(payload["file_path"])
+    if payload.get("then_extract"):
+        with connection() as conn:
+            conn.execute("UPDATE contracts SET extraction_status='Running', extraction_note=? WHERE id=?",
+                         (f"Reading scanned pages (OCR, attempt {attempt})", contract_id))
+    text = ocr.run(path)
+    with connection() as conn:
+        exists = conn.execute("SELECT 1 FROM contracts WHERE id=?", (contract_id,)).fetchone()
+        if exists:
+            add_audit(conn, "OCR completed", "Document Intelligence", contract_id,
+                      f"{len(text):,} characters recognised in {path.name.rsplit('.', 1)[-1].upper()} document")
+        ocr_done(conn, payload)
+
+
+def ocr_done(conn, payload: dict):
+    """After OCR (or after giving up on it), carry on with extraction and indexing."""
+    contract_id = payload.get("contract_id")
+    if not conn.execute("SELECT 1 FROM contracts WHERE id=?", (contract_id,)).fetchone():
+        return
+    if payload.get("then_extract"):
+        conn.execute("UPDATE contracts SET extraction_status='Queued' WHERE id=?", (contract_id,))
+        jobs.enqueue(conn, "extract", {"contract_id": contract_id, "placeholder_title": payload.get("placeholder_title")})
+    rag.queue(conn, contract_id)
+
+
+def ocr_failed(payload: dict, error: str):
+    with connection() as conn:
+        add_audit(conn, "OCR failed", "Document Intelligence", payload.get("contract_id"), error[:300])
+        ocr_done(conn, payload)  # extraction still runs, using page images
+
+
+jobs.handler("ocr", max_attempts=4, on_failure=ocr_failed)(ocr_job)
 
 
 def check_dates(values: dict):
@@ -403,7 +504,9 @@ def update_contract(contract_id: int, update: ContractUpdate, user: dict = Depen
 def validate_contract(contract_id: int, user: dict = Depends(require("contract.validate"))):
     now = utc_now()
     with connection() as conn:
-        load_contract(conn, contract_id)
+        contract = load_contract(conn, contract_id)
+        if contract["extraction_status"] in ("Queued", "Running"):
+            raise HTTPException(409, "The AI is still reading this document. Validate once its details are filled in.")
         conn.execute(
             "UPDATE contracts SET validation_status='Validated', reviewed_by=?, validated_at=?, updated_at=? WHERE id=?",
             (user["name"], now, now, contract_id),
@@ -463,7 +566,10 @@ def upload_version(
         )
         add_audit(conn, "New document version", user["name"], contract_id,
                   f"Version {version}: {file.filename}" + (f" — {note.strip()}" if note.strip() else ""))
-        rag.queue(conn, contract_id)
+        if ocr.configured() and ocr.needs_ocr(destination):
+            jobs.enqueue(conn, "ocr", {"contract_id": contract_id, "file_path": str(destination), "then_extract": False})
+        else:
+            rag.queue(conn, contract_id)
         return contract_response(conn, contract_id)
 
 
@@ -499,9 +605,17 @@ def version_preview(contract_id: int, version: int, _: dict = Depends(current_us
 def audit_log(
     limit: int = Query(100, ge=1, le=500),
     contract_id: int | None = None,
-    _: dict = Depends(require("audit.read")),
+    user: dict = Depends(require("audit.read")),
 ):
-    where, params = ("WHERE audit_log.contract_id=?", (contract_id,)) if contract_id else ("", ())
+    clauses, params = [], []
+    if contract_id:
+        clauses.append("audit_log.contract_id=?")
+        params.append(contract_id)
+    vis, vparams = visibility_sql(user, "contracts")
+    if vparams:  # restricted users see only the history of contracts they can see
+        clauses.append(f"audit_log.contract_id IS NOT NULL AND {vis}")
+        params.extend(vparams)
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with connection() as conn:
         rows = conn.execute(
             f"""SELECT audit_log.*, contracts.title contract_title, contracts.vendor_name
@@ -520,8 +634,8 @@ def csv_safe(value):
 
 
 @router.get("/export/contracts.csv")
-def export_contracts(filters: ContractFilters = Depends(), _: dict = Depends(current_user)):
-    contracts = query_contracts(limit=5000, **filters.values)
+def export_contracts(filters: ContractFilters = Depends(), user: dict = Depends(current_user)):
+    contracts = query_contracts(limit=5000, user=user, **filters.values)
     stream = io.StringIO()
     fields = ["reference_number", "title", "vendor_name", "project_name", "status", "owner", "department", "project_start_date", "project_end_date", "renewal_date", "currency", "one_time_amount", "optional_amount", "validation_status", "tags"]
     for item in contracts:

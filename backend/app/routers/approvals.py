@@ -1,6 +1,4 @@
-from datetime import datetime, timedelta, timezone
-
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from ..auth import APPROVER_ROLES, current_user, require
@@ -9,7 +7,8 @@ from ..workflow import (
     APPROVAL_DEFAULT_CHAIN, approval_detail, close_approval, contract_recipients, notify,
     pending_approval, users_with_roles,
 )
-from .ai import auto_review_enabled, current_review_id, review_brief, review_for_approval
+from .. import jobs
+from .ai import auto_review_enabled, current_review_id, review_brief, review_job_pending
 
 router = APIRouter(prefix="/api")
 
@@ -36,10 +35,8 @@ def detail(conn, request_id: int) -> dict:
     item = approval_detail(conn, request_id)
     item["ai_review"] = review_brief(conn, item.get("ai_review_id"))
     state = "attached" if item["ai_review"] else "none"
-    if state == "none" and item["status"] == "Pending" and auto_review_enabled():
-        submitted = datetime.fromisoformat(item["submitted_at"])
-        if datetime.now(timezone.utc) - submitted < timedelta(minutes=10):
-            state = "running"
+    if state == "none" and item["status"] == "Pending" and review_job_pending(conn, request_id):
+        state = "running"
     item["ai_review_state"] = state
     return item
 
@@ -57,8 +54,7 @@ def contract_approvals(contract_id: int, _: dict = Depends(current_user)):
 
 
 @router.post("/contracts/{contract_id}/approvals", status_code=201)
-def submit_for_approval(contract_id: int, body: ApprovalSubmit, background: BackgroundTasks,
-                        user: dict = Depends(require("approval.submit"))):
+def submit_for_approval(contract_id: int, body: ApprovalSubmit, user: dict = Depends(require("approval.submit"))):
     roles = body.roles or APPROVAL_DEFAULT_CHAIN
     if not 1 <= len(roles) <= 5 or any(role not in APPROVER_ROLES for role in roles):
         raise HTTPException(422, f"Choose 1–5 approval steps from: {', '.join(APPROVER_ROLES)}")
@@ -80,8 +76,8 @@ def submit_for_approval(contract_id: int, body: ApprovalSubmit, background: Back
         )
         request_id = cursor.lastrowid
         if review_id is None and auto_review_enabled():
-            # Runs after the response is sent, so submitting never waits on the model.
-            background.add_task(review_for_approval, request_id, contract_id)
+            # A background job, so submitting never waits on the model (retried if the model is down).
+            jobs.enqueue(conn, "ai_review", {"request_id": request_id, "contract_id": contract_id})
         for order, role in enumerate(roles, start=1):
             conn.execute(
                 "INSERT INTO approval_steps (request_id, step_order, role, status) VALUES (?,?,?,?)",

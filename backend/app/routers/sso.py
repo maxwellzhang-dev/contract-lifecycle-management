@@ -164,9 +164,14 @@ def find_or_create_user(conn, claims: dict):
     role = role or env("SSO_DEFAULT_ROLE", "viewer")
     if role not in ROLES:
         role = "viewer"
+    scope = env("SSO_DEFAULT_ACCESS_SCOPE", "all")
+    department = str(claims.get("department") or "").strip() or None  # optional Entra claim
+    if scope not in ("all", "department", "assigned") or (scope == "department" and not department):
+        scope = "assigned" if scope == "department" else "all"
     cursor = conn.execute(
-        "INSERT INTO users (email, name, role, password_hash, active, created_at, sso_subject) VALUES (?,?,?,?,1,?,?)",
-        (email, name, role, "!sso-only", utc_now(), subject),
+        """INSERT INTO users (email, name, role, password_hash, active, created_at, sso_subject, department, access_scope)
+           VALUES (?,?,?,?,1,?,?,?,?)""",
+        (email, name, role, "!sso-only", utc_now(), subject, department, scope),
     )
     add_audit(conn, "User created", "SSO", details=f"{name} ({email}) as {role} on first single sign-on")
     return conn.execute("SELECT * FROM users WHERE id=?", (cursor.lastrowid,)).fetchone()

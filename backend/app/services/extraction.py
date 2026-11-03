@@ -74,6 +74,11 @@ def extract_text_and_images(path: Path):
         images.append((mimetypes.guess_type(path.name)[0] or "image/jpeg", path.read_bytes()))
     else:
         raise ValueError("Supported formats are PDF, DOCX, PNG, JPG and WEBP.")
+    if len(text.strip()) < 200 and suffix != ".docx":
+        from .ocr import cached_text
+        ocr_text = cached_text(path)  # scanned document read by Document Intelligence
+        if ocr_text and ocr_text.strip():
+            text = ocr_text
     return text[:180000], images
 
 
@@ -91,7 +96,7 @@ def azure_extract(path: Path):
     api_key = os.getenv("AZURE_OPENAI_API_KEY", "")
     deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "")
     if not endpoint or not api_key or not deployment:
-        raise ValueError("Azure OpenAI environment variables are incomplete.")
+        raise ExtractionNotConfigured("Azure OpenAI environment variables are incomplete.")
 
     text, images = extract_text_and_images(path)
     content = [{"type": "input_text", "text": f"Extract the contract fields from this document.\n\n{text}"}]
@@ -157,8 +162,18 @@ def fallback_extract(path: Path, reason: str):
     return result
 
 
-def extract_contract(path: Path):
+class ExtractionNotConfigured(ValueError):
+    """Azure OpenAI is not set up; retrying will not help."""
+
+
+def extract_contract(path: Path, allow_fallback: bool = True):
+    """AI extraction. Falls back to simple local rules when the AI is not configured, or when
+    it fails and `allow_fallback` is set (otherwise the error is raised so the job can retry)."""
     try:
         return azure_extract(path)
-    except Exception as exc:
+    except ExtractionNotConfigured as exc:
         return fallback_extract(path, str(exc))
+    except Exception as exc:
+        if allow_fallback:
+            return fallback_extract(path, str(exc))
+        raise
