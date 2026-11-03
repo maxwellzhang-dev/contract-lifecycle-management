@@ -129,6 +129,7 @@ az containerapp create \
   --secrets \
     azure-openai-endpoint="$AZURE_OPENAI_ENDPOINT" \
     azure-openai-api-key="$AZURE_OPENAI_API_KEY" \
+    clause-seed-password="$CLAUSE_SEED_PASSWORD" \
   --env-vars \
     PORT=8000 \
     DATABASE_PATH=/data/contracts.db \
@@ -136,8 +137,26 @@ az containerapp create \
     AZURE_OPENAI_ENDPOINT=secretref:azure-openai-endpoint \
     AZURE_OPENAI_API_KEY=secretref:azure-openai-api-key \
     AZURE_OPENAI_DEPLOYMENT=$AZURE_OPENAI_DEPLOYMENT \
-    AZURE_OPENAI_API_VERSION=$AZURE_OPENAI_API_VERSION
+    AZURE_OPENAI_API_VERSION=$AZURE_OPENAI_API_VERSION \
+    CLAUSE_SEED_PASSWORD=secretref:clause-seed-password \
+    COOKIE_SECURE=1 \
+    PUBLIC_APP_URL="https://<frontend-app-fqdn>" \
+    SEED_DEMO_DATA=0
 ```
+
+Set `PUBLIC_APP_URL` to the frontend's public address: e-signature links and the single sign-on redirect point there.
+
+To use Entra ID sign-in, add the client secret as a secret and the SSO variables from the README:
+
+```bash
+az containerapp secret set --name "$BACKEND_APP" --resource-group "$RESOURCE_GROUP" \
+  --secrets sso-client-secret="$SSO_CLIENT_SECRET"
+az containerapp update --name "$BACKEND_APP" --resource-group "$RESOURCE_GROUP" \
+  --set-env-vars ENTRA_TENANT_ID="$ENTRA_TENANT_ID" SSO_CLIENT_ID="$SSO_CLIENT_ID" \
+    SSO_CLIENT_SECRET=secretref:sso-client-secret PASSWORD_LOGIN=0
+```
+
+Set `CLAUSE_SEED_PASSWORD` to a strong value before the first start. It becomes the initial password of the seeded accounts (see the README), so sign in and change each one, or deactivate the ones you do not need. `COOKIE_SECURE=1` restricts the session cookie to HTTPS. Keep `--max-replicas 1` while you use SQLite. With PostgreSQL (`DATABASE_URL`, see the README) you can run several replicas: reminders are de-duplicated in the database, so each is sent once. Mount the same Azure Files share for `UPLOAD_DIR` on every replica.
 
 The backend is internal-only. Other Container Apps in the same environment can call it by app name:
 
