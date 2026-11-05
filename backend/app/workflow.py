@@ -8,6 +8,7 @@ from email.message import EmailMessage
 
 from . import jobs
 from .database import utc_now
+from .services import teams
 
 log = logging.getLogger("clause.workflow")
 
@@ -106,8 +107,9 @@ def contract_recipients(conn, *names) -> list[int]:
 
 
 def notify(conn, user_ids, kind: str, title: str, body: str | None = None,
-           contract_id: int | None = None, dedupe_key: str | None = None) -> int:
-    """Create one notification per user. With a dedupe_key, a user gets it at most once."""
+           contract_id: int | None = None, dedupe_key: str | None = None, channel: bool = True) -> int:
+    """Create one notification per user. With a dedupe_key, a user gets it at most once.
+    When anyone was notified, the event is also posted to Teams (unless `channel` is False)."""
     created = 0
     for user_id in dict.fromkeys(user_ids):
         cursor = conn.execute(
@@ -120,6 +122,8 @@ def notify(conn, user_ids, kind: str, title: str, body: str | None = None,
             email = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
             if email:
                 send_email(email["email"], title, body or title, conn)
+    if created and channel:
+        teams.post(conn, kind, title, body, contract_id)
     return created
 
 
@@ -218,5 +222,23 @@ def run_reminders(conn, today: date | None = None) -> int:
             conn, recipients, "obligation", title,
             f"{item['kind']} for {item['contract_title']} · due {item['due_date']}",
             item["contract_id"], f"obligation:{item['id']}:{item['due_date']}:{'overdue' if overdue else 'soon'}",
+        )
+    invoices = conn.execute(
+        """SELECT i.*, c.title contract_title, c.owner contract_owner FROM contract_invoices i
+           JOIN contracts c ON c.id = i.contract_id
+           WHERE i.status IN ('Received','Approved') AND i.due_date IS NOT NULL AND c.status != 'Cancelled'"""
+    ).fetchall()
+    for item in invoices:
+        days = _days(item["due_date"], today)
+        if days is None or days > 7:
+            continue
+        overdue = days < 0
+        label = item["invoice_number"] or f"#{item['id']}"
+        title = (f"Invoice {label} for {item['contract_title']} is overdue" if overdue
+                 else f"Invoice {label} for {item['contract_title']} is due {'today' if days == 0 else f'in {days} days'}")
+        created += notify(
+            conn, users_with_roles(conn, ("finance",)) or contract_recipients(conn, item["contract_owner"]), "invoice", title,
+            f"{item['currency']} {item['amount']:,.2f} · due {item['due_date']} · {item['status']}",
+            item["contract_id"], f"invoice:{item['id']}:{item['due_date']}:{'overdue' if overdue else 'soon'}",
         )
     return created

@@ -257,3 +257,17 @@ def test_auto_review_can_be_turned_off(client, users, fake_llm, contract, monkey
     assert fake_llm == []
     request = client.get(f"/api/contracts/{contract['id']}/approvals", headers=users["legal"]).json()[0]
     assert request["ai_review_state"] == "none"
+
+
+def test_answers_follow_the_interface_language(client, users, fake_llm, monkeypatch):
+    for key, value in {"AZURE_OPENAI_ENDPOINT": "https://x.invalid", "AZURE_OPENAI_API_KEY": "k", "AZURE_OPENAI_DEPLOYMENT": "d"}.items():
+        monkeypatch.setenv(key, value)
+    contract = upload_docx(client, users["procurement"], "Either party may terminate on thirty (30) days notice.")
+    zh = {**users["legal"], "X-Clause-Language": "zh"}
+    client.post(f"/api/contracts/{contract['id']}/ai/questions", headers=zh, json={"question": "终止需要提前多久通知？"})
+    client.post(f"/api/contracts/{contract['id']}/ai/review", headers=zh)
+    client.post("/api/ai/portfolio", headers=zh, json={"question": "哪些合同今年到期？"})
+    client.post(f"/api/contracts/{contract['id']}/ai/questions", headers=users["legal"], json={"question": "Notice?"})
+    chinese = [c for c in fake_llm if "Simplified Chinese" in c["instructions"]]
+    assert [c["name"] for c in chinese] == ["contract_answer", "contract_review", "portfolio_answer"]
+    assert "Simplified Chinese" not in fake_llm[-1]["instructions"]

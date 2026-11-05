@@ -69,7 +69,7 @@ def _translate_code(code: str) -> str:
 
 
 # Tables whose primary key is not a generated id; every other INSERT returns its new id.
-NO_ID_TABLES = {"sessions", "sso_states", "rag_documents", "contract_members"}
+NO_ID_TABLES = {"sessions", "sso_states", "rag_documents", "contract_members", "calendar_feeds"}
 _INSERT = re.compile(r"^\s*INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+(\w+)", re.I)
 
 

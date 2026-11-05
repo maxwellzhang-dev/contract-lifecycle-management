@@ -1,14 +1,18 @@
+import { getLocale } from "./i18n";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/backend-api";
 
 export const contractStatuses = ["Quoting", "Under Review", "Cleared to Start", "In Progress", "Completed", "On Hold", "Cancelled"] as const;
 export const approverRoles = ["legal", "finance", "procurement", "admin"] as const;
 export const roles = ["admin", "legal", "procurement", "finance", "viewer"] as const;
 export const obligationKinds = ["Deliverable", "Payment", "Milestone", "Compliance", "Renewal", "Other"] as const;
+export const contractRelationships = ["SOW", "Amendment", "Order form", "Renewal", "Other"] as const;
+export const invoiceStatuses = ["Received", "Approved", "Paid", "Disputed"] as const;
 export const obligationStatuses = ["Open", "Done", "Waived"] as const;
 
 export type Permission =
   | "contract.create" | "contract.edit" | "contract.delete" | "contract.validate"
-  | "approval.submit" | "signature.send" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use";
+  | "approval.submit" | "signature.send" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use" | "playbook.manage" | "invoice.manage";
 
 export type User = {
   id: number;
@@ -66,8 +70,39 @@ export type Contract = {
   signed_at?: string | null;
   extraction_status?: "Queued" | "Running" | "Done" | "Failed" | null;
   tags: string[];
+  parent_id?: number | null;
+  relationship?: string | null;
+  child_count?: number;
   pending_approval_id: number | null;
   allowed_transitions: string[];
+};
+
+export type FamilyNode = {
+  id: number; title: string; reference_number: string | null; vendor_name: string | null; status: string;
+  relationship: string | null; currency: string | null; value: number | null;
+  project_start_date: string | null; project_end_date: string | null; invoiced: number; children: FamilyNode[];
+};
+export type Family = {
+  root: FamilyNode; contract_id: number; count: number; active_count: number; hidden_count: number;
+  value_by_currency: { currency: string; value: number }[]; invoiced_by_currency: { currency: string; value: number }[];
+  first_start: string | null; last_end: string | null;
+};
+
+export type SpendLevel = "ok" | "warning" | "over" | "unknown";
+export type Spend = {
+  currency: string | null; budget: number | null; invoiced: number; paid: number; unpaid: number; disputed: number;
+  overdue: number; remaining: number | null; percent: number | null; level: SpendLevel; warn_percent: number; invoice_count: number;
+};
+export type Invoice = {
+  id: number; contract_id: number; invoice_number: string | null; invoice_date: string | null; due_date: string | null;
+  amount: number; currency: string; status: (typeof invoiceStatuses)[number]; paid_at: string | null;
+  obligation_id: number | null; obligation_title: string | null; notes: string | null; created_by: string; overdue: boolean;
+};
+export type SpendOverview = {
+  items: { contract_id: number; title: string; vendor_name: string | null; status: string; currency: string | null; budget: number | null;
+    invoiced: number; paid: number; percent: number | null; remaining: number | null; level: SpendLevel; invoice_count: number }[];
+  totals: { currency: string; budget: number; invoiced: number; paid: number }[];
+  warn_percent: number; counts: Record<SpendLevel, number>;
 };
 
 export type Dashboard = {
@@ -83,6 +118,7 @@ export type Dashboard = {
   pending_approvals: number;
   obligations_overdue: number;
   obligations_due_30_days: number;
+  over_budget?: number;
   value_by_currency: { currency: string; value: number }[];
   total_value_by_currency: { currency: string; value: number }[];
   status_distribution: { status: string; count: number }[];
@@ -132,6 +168,20 @@ export type AiReviewBrief = {
   risk_counts: RiskCounts;
   top_risks: { category: string; severity: "high" | "medium" | "low"; finding: string }[];
   missing_clauses: string[];
+  playbook_counts: PlaybookCounts | null;
+  playbook_issues: { title: string; severity: Severity; status: PlaybookStatus; finding: string }[];
+};
+
+export type Severity = "high" | "medium" | "low";
+export type PlaybookStatus = "meets" | "fallback" | "deviates" | "missing" | "not_applicable";
+export type PlaybookCounts = Record<PlaybookStatus, number>;
+export type PlaybookRule = {
+  id: number; title: string; category: string; severity: Severity; standard: string; fallback: string | null;
+  guidance: string | null; active: boolean; created_by: string | null; updated_at: string;
+};
+export type PlaybookCheck = {
+  rule_id: number; title: string; category: string; severity: Severity; standard: string; fallback: string | null;
+  status: PlaybookStatus; finding: string; quote: string | null; suggested_language: string | null;
 };
 
 export type InboxItem = {
@@ -152,6 +202,7 @@ export type InboxItem = {
   project_start_date?: string | null;
   project_end_date?: string | null;
   ai_risk_counts: RiskCounts | null;
+  ai_playbook_counts: PlaybookCounts | null;
 };
 
 export type Version = {
@@ -246,6 +297,7 @@ export type AiReviewResult = {
   obligations: { title: string; kind: string; due_date: string | null; amount: number | null; currency: string | null; quote: string | null }[];
   missing_clauses: string[];
   field_mismatches: { field: string; record_value: string | null; document_value: string; quote: string | null }[];
+  playbook?: PlaybookCheck[];
 };
 
 export type AiReview = {
@@ -348,7 +400,10 @@ async function read<T>(response: Response): Promise<T> {
 }
 
 function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  return fetch(`${API_BASE}${path}`, { credentials: "include", ...init }).then(read<T>);
+  // The interface language, so AI answers come back in it.
+  const headers = new Headers(init.headers);
+  headers.set("X-Clause-Language", getLocale());
+  return fetch(`${API_BASE}${path}`, { credentials: "include", ...init, headers }).then(read<T>);
 }
 
 function json<T>(path: string, method: string, body?: unknown): Promise<T> {
@@ -364,6 +419,7 @@ export const fileUrl = (contractId: number, version?: number) =>
 export const ssoLoginUrl = `${API_BASE}/api/auth/sso/login`;
 export const signedCopyUrl = (requestId: number) => `${API_BASE}/api/signatures/${requestId}/signed-copy`;
 export const signingDocumentUrl = (token: string) => `${API_BASE}/api/sign/${encodeURIComponent(token)}/document`;
+export const contractCalendarUrl = (contractId: number) => `${API_BASE}/api/contracts/${contractId}/calendar.ics`;
 export const previewUrl = (contractId: number, version?: number) =>
   version ? `${API_BASE}/api/contracts/${contractId}/versions/${version}/preview` : `${API_BASE}/api/contracts/${contractId}/preview`;
 
@@ -384,6 +440,12 @@ export const api = {
   remove: (id: number) => json<{ deleted: boolean; id: number }>(`/api/contracts/${id}`, "DELETE"),
   upload: (form: FormData) => request<Contract>("/api/contracts/upload", { method: "POST", body: form }),
 
+  invoices: (id: number) => request<{ spend: Spend; items: Invoice[] }>(`/api/contracts/${id}/invoices`),
+  createInvoice: (id: number, values: Partial<Invoice>) => json<Invoice>(`/api/contracts/${id}/invoices`, "POST", values),
+  updateInvoice: (id: number, values: Partial<Invoice>) => json<Invoice>(`/api/invoices/${id}`, "PATCH", values),
+  deleteInvoice: (id: number) => json<{ deleted: boolean }>(`/api/invoices/${id}`, "DELETE"),
+  spend: (level = "") => request<SpendOverview>(`/api/spend${level ? `?level=${level}` : ""}`),
+  family: (id: number) => request<Family>(`/api/contracts/${id}/family`),
   versions: (id: number) => request<Version[]>(`/api/contracts/${id}/versions`),
   uploadVersion: (id: number, form: FormData) => request<Contract>(`/api/contracts/${id}/versions`, { method: "POST", body: form }),
 
@@ -417,6 +479,11 @@ export const api = {
   updateTemplate: (id: number, values: Partial<Template>) => json<Template>(`/api/templates/${id}`, "PATCH", values),
   createContract: (values: Record<string, unknown>) => json<Contract>("/api/contracts", "POST", values),
 
+  playbook: () => request<{ rules: PlaybookRule[]; categories: string[]; max_active: number }>("/api/playbook"),
+  createRule: (values: Partial<PlaybookRule>) => json<PlaybookRule>("/api/playbook", "POST", values),
+  updateRule: (id: number, values: Partial<PlaybookRule>) => json<PlaybookRule>(`/api/playbook/${id}`, "PATCH", values),
+  deleteRule: (id: number) => json<{ deleted: boolean }>(`/api/playbook/${id}`, "DELETE"),
+
   aiStatus: () => request<{ configured: boolean; model: string }>("/api/ai/status"),
   aiReview: (id: number) => request<AiReview | null>(`/api/contracts/${id}/ai/review`),
   runAiReview: (id: number) => json<AiReview>(`/api/contracts/${id}/ai/review`, "POST"),
@@ -444,6 +511,12 @@ export const api = {
   readNotification: (id: number) => json<{ read: boolean }>(`/api/notifications/${id}/read`, "POST"),
   readAllNotifications: () => json<{ read: boolean }>("/api/notifications/read-all", "POST"),
   runReminders: () => json<{ created: number }>("/api/reminders/run", "POST"),
+
+  calendarStatus: () => request<{ subscribed: boolean; created_at: string | null }>("/api/calendar"),
+  createCalendarLink: () => json<{ url: string; webcal_url: string; subscribed: boolean }>("/api/calendar/token", "POST"),
+  revokeCalendarLink: () => json<{ subscribed: boolean }>("/api/calendar/token", "DELETE"),
+  integrations: () => request<{ teams: { configured: boolean; events: string[] } }>("/api/integrations"),
+  teamsTest: () => json<{ queued: boolean }>("/api/integrations/teams/test", "POST"),
 
   directory: () => request<DirectoryEntry[]>("/api/users/directory"),
   users: () => request<User[]>("/api/users"),

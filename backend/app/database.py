@@ -136,6 +136,8 @@ CREATE TABLE IF NOT EXISTS contracts (
     document_version INTEGER NOT NULL DEFAULT 1,
     signed_at TEXT,
     extraction_status TEXT,
+    parent_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL,
+    relationship TEXT,
     uploaded_by TEXT,
     upload_date TEXT,
     created_at TEXT NOT NULL,
@@ -355,13 +357,49 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, run_after);
+CREATE TABLE IF NOT EXISTS contract_invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    invoice_number TEXT,
+    invoice_date TEXT,
+    due_date TEXT,
+    amount REAL NOT NULL,
+    currency TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Received',
+    paid_at TEXT,
+    obligation_id INTEGER REFERENCES obligations(id) ON DELETE SET NULL,
+    notes TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_contract ON contract_invoices(contract_id);
+CREATE TABLE IF NOT EXISTS calendar_feeds (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS playbook_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'medium',
+    standard TEXT NOT NULL,
+    fallback TEXT,
+    guidance TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_ai_review_contract ON ai_reviews(contract_id);
 CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id);
 """
 
 # Columns added after the first prototype release; older databases get them via ALTER TABLE.
 ADDED_COLUMNS = {
-    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT", "extraction_status": "TEXT"},
+    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT", "extraction_status": "TEXT",
+                  "parent_id": "INTEGER REFERENCES contracts(id) ON DELETE SET NULL", "relationship": "TEXT"},
     "approval_requests": {"ai_review_id": "INTEGER"},
     "users": {"sso_subject": "TEXT", "department": "TEXT", "access_scope": "TEXT NOT NULL DEFAULT 'all'"},
     "ai_portfolio_questions": {"source": "TEXT NOT NULL DEFAULT 'records'"},
@@ -374,6 +412,7 @@ def migrate(conn):
         for column, kind in columns.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_contract_parent ON contracts(parent_id)")
     conn.execute("UPDATE contracts SET status='Quoting' WHERE status='Draft'")
     conn.execute("UPDATE contracts SET status='In Progress' WHERE status='Active'")
     # Give every uploaded document a version 1 row so version history starts complete.
@@ -388,6 +427,7 @@ def migrate(conn):
 
 def init_db():
     from .auth import seed_users  # local imports: these modules import this one
+    from .routers.playbook import seed_playbook
     from .routers.templates import seed_templates
 
     with connection() as conn:
@@ -399,6 +439,7 @@ def init_db():
         migrate(conn)
         seed_users(conn)
         seed_templates(conn)
+        seed_playbook(conn)
         if conn.execute("SELECT COUNT(*) FROM contracts").fetchone()[0] == 0 and os.getenv("SEED_DEMO_DATA", "1") == "1":
             seed_contracts(conn)
 

@@ -187,5 +187,6 @@ def inbox(user: dict = Depends(current_user)):
         items = []
         for row in rows:
             brief = review_brief(conn, row["ai_review_id"])
-            items.append({**dict(row), "ai_risk_counts": brief["risk_counts"] if brief else None})
+            items.append({**dict(row), "ai_risk_counts": brief["risk_counts"] if brief else None,
+                          "ai_playbook_counts": brief["playbook_counts"] if brief else None})
     return items

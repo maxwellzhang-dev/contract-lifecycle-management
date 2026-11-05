@@ -36,6 +36,8 @@ PERMISSIONS = {
     "template.manage": {"admin", "legal"},
     "ai.use": {"admin", "legal", "procurement", "finance"},
     "signature.send": {"admin", "legal", "procurement"},
+    "playbook.manage": {"admin", "legal"},
+    "invoice.manage": {"admin", "finance", "procurement"},
 }
 
 

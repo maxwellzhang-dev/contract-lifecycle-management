@@ -144,7 +144,16 @@ az containerapp create \
     SEED_DEMO_DATA=0
 ```
 
-Set `PUBLIC_APP_URL` to the frontend's public address: e-signature links and the single sign-on redirect point there.
+Set `PUBLIC_APP_URL` to the frontend's public address: e-signature links, calendar feed links, Teams buttons and the single sign-on redirect point there.
+
+To post workflow events to a Teams channel, store the Workflows webhook URL as a secret (it lets anyone post to that channel):
+
+```bash
+az containerapp secret set --name "$BACKEND_APP" --resource-group "$RESOURCE_GROUP" \
+  --secrets teams-webhook-url="$TEAMS_WEBHOOK_URL"
+az containerapp update --name "$BACKEND_APP" --resource-group "$RESOURCE_GROUP" \
+  --set-env-vars TEAMS_WEBHOOK_URL=secretref:teams-webhook-url
+```
 
 To use Entra ID sign-in, add the client secret as a secret and the SSO variables from the README:
 
