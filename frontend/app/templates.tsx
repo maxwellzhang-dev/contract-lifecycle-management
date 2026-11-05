@@ -4,8 +4,9 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { FilePlus2, Pencil } from "lucide-react";
 import { api, type Contract, type Template } from "./api";
 import { SectionHeader, dateLabel, errorText } from "./shared";
+import { t } from "./i18n";
 
-const MISSING = "[to be confirmed]";
+const MISSING = "[to be confirmed]"; // printed into documents, so not translated
 
 function renderTemplate(body: string, values: Record<string, unknown>) {
   const all: Record<string, unknown> = { ...values, today: new Date().toISOString().slice(0, 10) };
@@ -64,19 +65,19 @@ export function NewContractModal({ onClose, onCreated }: { onClose: () => void; 
   }
 
   return <div className="modal-backdrop" onMouseDown={onClose}><form className="upload-modal wf-new-contract" onSubmit={submit} onMouseDown={e => e.stopPropagation()}>
-    <header><div><p className="eyebrow">NEW CONTRACT</p><h2>Create a contract</h2><p>Start from a template to generate a Word document, or create a record without a document.</p></div><button type="button" onClick={onClose} aria-label="Close">×</button></header>
+    <header><div><p className="eyebrow">{t("NEW CONTRACT")}</p><h2>{t("Create a contract")}</h2><p>{t("Start from a template to generate a Word document, or create a record without a document.")}</p></div><button type="button" onClick={onClose} aria-label={t("Close")}>×</button></header>
     <div className="wf-template-picker">
-      <button type="button" className={templateId === "" ? "active" : ""} onClick={() => choose("")}><strong>Blank record</strong><small>No document. Upload one later from the Versions tab.</small></button>
-      {templates.map(t => <button type="button" key={t.id} className={templateId === t.id ? "active" : ""} onClick={() => choose(t.id)}><strong>{t.name}</strong><small>{t.description ?? "Template"}</small></button>)}
+      <button type="button" className={templateId === "" ? "active" : ""} onClick={() => choose("")}><strong>{t("Blank record")}</strong><small>{t("No document. Upload one later from the Versions tab.")}</small></button>
+      {templates.map(tpl => <button type="button" key={tpl.id} className={templateId === tpl.id ? "active" : ""} onClick={() => choose(tpl.id)}><strong>{tpl.name}</strong><small>{tpl.description ?? t("Template")}</small></button>)}
     </div>
     <div className="wf-new-layout">
-      <div className="edit-grid">{fields.map(f => <label key={f.key} className={f.wide ? "wide" : ""}><span>{f.label}</span>
+      <div className="edit-grid">{fields.map(f => <label key={f.key} className={f.wide ? "wide" : ""}><span>{t(f.label)}</span>
         {f.long ? <textarea value={values[f.key] ?? ""} onChange={e => setValues({ ...values, [f.key]: e.target.value })} /> :
           <input type={f.type ?? "text"} required={f.key === "title"} value={values[f.key] ?? ""} onChange={e => setValues({ ...values, [f.key]: e.target.value })} />}</label>)}</div>
-      {template && <aside className="wf-preview"><h3>Document preview</h3><pre>{preview}</pre></aside>}
+      {template && <aside className="wf-preview"><h3>{t("Document preview")}</h3><pre>{preview}</pre></aside>}
     </div>
     {error && <p className="form-error">{error}</p>}
-    <footer><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || !values.title?.trim()}>{busy ? "Creating…" : template ? "Create and generate document" : "Create contract"}</button></footer>
+    <footer><button type="button" className="secondary-button" onClick={onClose}>{t("Cancel")}</button><button className="primary-button" disabled={busy || !values.title?.trim()}>{busy ? t("Creating…") : template ? t("Create and generate document") : t("Create contract")}</button></footer>
   </form></div>;
 }
 
@@ -101,37 +102,37 @@ export function TemplatesView() {
     const payload = { name: editing.name, description: editing.description, body: editing.body, defaults };
     try {
       if (editing.id) await api.updateTemplate(editing.id, payload); else await api.createTemplate(payload);
-      setEditing(null); setTick(t => t + 1); setMessage("Template saved.");
+      setEditing(null); setTick(n => n + 1); setMessage(t("Template saved."));
     } catch (err) { setMessage(errorText(err, "Could not save")); }
   }
-  async function toggle(t: Template) {
-    try { await api.updateTemplate(t.id, { active: !t.active }); setTick(x => x + 1); } catch (err) { setMessage(errorText(err, "Could not update")); }
+  async function toggle(tpl: Template) {
+    try { await api.updateTemplate(tpl.id, { active: !tpl.active }); setTick(x => x + 1); } catch (err) { setMessage(errorText(err, "Could not update")); }
   }
   function insert(name: string) {
     if (editing) setEditing({ ...editing, body: `${editing.body}{{${name}}}` });
   }
 
   return <>
-    <SectionHeader eyebrow="TEMPLATES" title="Contract templates" copy="Text with {{placeholders}} that becomes a Word document when someone creates a contract from it." />
-    {!editing && <button className="primary-button wf-new-template" onClick={() => setEditing({ ...emptyTemplate, defaults: {} })}><FilePlus2 size={16}/> New template</button>}
+    <SectionHeader eyebrow={t("TEMPLATES")} title={t("Contract templates")} copy={t("Text with {{placeholders}} that becomes a Word document when someone creates a contract from it.")} />
+    {!editing && <button className="primary-button wf-new-template" onClick={() => setEditing({ ...emptyTemplate, defaults: {} })}><FilePlus2 size={16}/> {t("New template")}</button>}
     {message && <p className="save-message">{message}</p>}
     {editing && <form className="panel wf-card" onSubmit={save}>
-      <h3>{editing.id ? "Edit template" : "New template"}</h3>
+      <h3>{editing.id ? t("Edit template") : t("New template")}</h3>
       <div className="wf-grid">
-        <label className="wf-field">Name<input required value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} /></label>
-        <label className="wf-field">Description<input value={editing.description} onChange={e => setEditing({ ...editing, description: e.target.value })} /></label>
+        <label className="wf-field">{t("Name")}<input required value={editing.name} onChange={e => setEditing({ ...editing, name: e.target.value })} /></label>
+        <label className="wf-field">{t("Description")}<input value={editing.description} onChange={e => setEditing({ ...editing, description: e.target.value })} /></label>
       </div>
-      <label className="wf-field">Template text<textarea className="wf-template-body" required value={editing.body} onChange={e => setEditing({ ...editing, body: e.target.value })} placeholder={"# Heading\nParagraph text with {{vendor_name}}…"} /></label>
-      <div className="wf-chain"><small className="wf-hint">Insert:</small>{meta.placeholders.map(p => <button type="button" key={p} className="wf-chip" onClick={() => insert(p)}>{`{{${p}}}`}</button>)}</div>
-      <p className="wf-hint">Start a paragraph with “# ” to make it a heading. Separate paragraphs with a blank line. Empty values print as “{MISSING}”.</p>
-      <h4 className="wf-subhead">Default values for new contracts</h4>
-      <div className="wf-grid">{meta.default_fields.map(f => <label key={f} className="wf-field">{f.replace(/_/g, " ")}<input value={editing.defaults[f] ?? ""} onChange={e => setEditing({ ...editing, defaults: { ...editing.defaults, [f]: e.target.value } })} /></label>)}</div>
-      <div className="wf-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>Cancel</button><button className="primary-button">Save template</button></div>
+      <label className="wf-field">{t("Template text")}<textarea className="wf-template-body" required value={editing.body} onChange={e => setEditing({ ...editing, body: e.target.value })} placeholder={t("# Heading\nParagraph text with {{vendor_name}}…")} /></label>
+      <div className="wf-chain"><small className="wf-hint">{t("Insert:")}</small>{meta.placeholders.map(p => <button type="button" key={p} className="wf-chip" onClick={() => insert(p)}>{`{{${p}}}`}</button>)}</div>
+      <p className="wf-hint">{t("Start a paragraph with “# ” to make it a heading. Separate paragraphs with a blank line. Empty values print as “{missing}”.", { missing: MISSING })}</p>
+      <h4 className="wf-subhead">{t("Default values for new contracts")}</h4>
+      <div className="wf-grid">{meta.default_fields.map(f => <label key={f} className="wf-field">{t(f.replace(/_/g, " "))}<input value={editing.defaults[f] ?? ""} onChange={e => setEditing({ ...editing, defaults: { ...editing.defaults, [f]: e.target.value } })} /></label>)}</div>
+      <div className="wf-actions"><button type="button" className="secondary-button" onClick={() => setEditing(null)}>{t("Cancel")}</button><button className="primary-button">{t("Save template")}</button></div>
     </form>}
-    <section className="panel"><ul className="wf-list">{templates.map(t => <li key={t.id} className={t.active ? "" : "inactive"}>
-      <div><strong>{t.name}</strong><small>{t.description ?? "No description"} · {t.placeholders.length} placeholders · updated {dateLabel(t.updated_at)}{t.active ? "" : " · inactive"}</small></div>
-      <button className="secondary-button" onClick={() => setEditing({ id: t.id, name: t.name, description: t.description ?? "", body: t.body, defaults: { ...t.defaults } })}><Pencil size={14}/> Edit</button>
-      <button className={t.active ? "danger-button" : "secondary-button"} onClick={() => void toggle(t)}>{t.active ? "Deactivate" : "Reactivate"}</button>
+    <section className="panel"><ul className="wf-list">{templates.map(tpl => <li key={tpl.id} className={tpl.active ? "" : "inactive"}>
+      <div><strong>{tpl.name}</strong><small>{t("{description} · {n} placeholders · updated {date}", { description: tpl.description ?? t("No description"), n: tpl.placeholders.length, date: dateLabel(tpl.updated_at) })}{tpl.active ? "" : ` · ${t("inactive")}`}</small></div>
+      <button className="secondary-button" onClick={() => setEditing({ id: tpl.id, name: tpl.name, description: tpl.description ?? "", body: tpl.body, defaults: { ...tpl.defaults } })}><Pencil size={14}/> {t("Edit")}</button>
+      <button className={tpl.active ? "danger-button" : "secondary-button"} onClick={() => void toggle(tpl)}>{tpl.active ? t("Deactivate") : t("Reactivate")}</button>
     </li>)}</ul></section>
   </>;
 }

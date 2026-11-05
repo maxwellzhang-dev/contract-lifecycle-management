@@ -6,16 +6,17 @@ import { FormEvent, useEffect, useState } from "react";
 import { AlertTriangle, Receipt, Trash2 } from "lucide-react";
 import { api, can, invoiceStatuses, type Contract, type Invoice, type Obligation, type Spend, type SpendOverview, type User } from "./api";
 import { Status, amountLabel, dateLabel, errorText } from "./shared";
+import { intlLocale, t } from "./i18n";
 
 const emptyForm = { invoice_number: "", invoice_date: "", due_date: "", amount: "", status: "Received", obligation_id: "", notes: "" };
 
 export function SpendMeter({ spend }: { spend: Pick<Spend, "budget" | "invoiced" | "paid" | "percent" | "level" | "warn_percent"> }) {
   const used = spend.budget ? Math.min(100, (spend.invoiced / spend.budget) * 100) : spend.invoiced ? 100 : 0;
   const paid = spend.budget ? Math.min(100, (spend.paid / spend.budget) * 100) : 0;
-  return <div className={`spend-meter ${spend.level}`} role="img" aria-label={`${spend.percent ?? 0}% of the contract value invoiced`}>
+  return <div className={`spend-meter ${spend.level}`} role="img" aria-label={t("{n}% of the contract value invoiced", { n: spend.percent ?? 0 })}>
     <span className="spend-invoiced" style={{ width: `${used}%` }} />
     <span className="spend-paid" style={{ width: `${paid}%` }} />
-    {spend.budget ? <i style={{ left: `${spend.warn_percent}%` }} title={`Warning at ${spend.warn_percent}%`} /> : null}
+    {spend.budget ? <i style={{ left: `${spend.warn_percent}%` }} title={t("Warning at {n}%", { n: spend.warn_percent })} /> : null}
   </div>;
 }
 
@@ -38,7 +39,7 @@ export function SpendPanel({ contract, user }: { contract: Contract; user: User 
 
   async function run(action: () => Promise<unknown>) {
     setBusy(true); setMessage("");
-    try { await action(); setTick(t => t + 1); return true; } catch (err) { setMessage(errorText(err, "Action failed")); return false; } finally { setBusy(false); }
+    try { await action(); setTick(n => n + 1); return true; } catch (err) { setMessage(errorText(err, "Action failed")); return false; } finally { setBusy(false); }
   }
   async function add(event: FormEvent) {
     event.preventDefault();
@@ -52,45 +53,45 @@ export function SpendPanel({ contract, user }: { contract: Contract; user: User 
 
   return <div className="wf-panel">
     {spend && <section className="wf-card spend-card">
-      <header className="wf-card-head"><div><h3><Receipt size={15}/> Contract value used</h3>
-        <small>{spend.budget == null ? "This contract has no value yet, so usage cannot be measured." : `${spend.percent ?? 0}% invoiced · warning at ${spend.warn_percent}%`}</small></div>
-        {spend.level === "over" && <span className="spend-flag over"><AlertTriangle size={14}/> Over budget</span>}
-        {spend.level === "warning" && <span className="spend-flag warning"><AlertTriangle size={14}/> Nearly used</span>}
+      <header className="wf-card-head"><div><h3><Receipt size={15}/> {t("Contract value used")}</h3>
+        <small>{spend.budget == null ? t("This contract has no value yet, so usage cannot be measured.") : t("{n}% invoiced · warning at {warn}%", { n: spend.percent ?? 0, warn: spend.warn_percent })}</small></div>
+        {spend.level === "over" && <span className="spend-flag over"><AlertTriangle size={14}/> {t("Over budget")}</span>}
+        {spend.level === "warning" && <span className="spend-flag warning"><AlertTriangle size={14}/> {t("Nearly used")}</span>}
       </header>
       <SpendMeter spend={spend} />
       <dl className="spend-figures">
-        <div><dt>Contract value</dt><dd>{amountLabel(spend.currency, spend.budget)}</dd></div>
-        <div><dt>Invoiced</dt><dd>{amountLabel(spend.currency, spend.invoiced)}</dd></div>
-        <div><dt>Paid</dt><dd>{amountLabel(spend.currency, spend.paid)}</dd></div>
-        <div><dt>Remaining</dt><dd className={spend.remaining != null && spend.remaining < 0 ? "negative" : ""}>{amountLabel(spend.currency, spend.remaining)}</dd></div>
-        {spend.overdue > 0 && <div><dt>Overdue to pay</dt><dd className="negative">{amountLabel(spend.currency, spend.overdue)}</dd></div>}
-        {spend.disputed > 0 && <div><dt>Disputed (not counted)</dt><dd>{amountLabel(spend.currency, spend.disputed)}</dd></div>}
+        <div><dt>{t("Contract value")}</dt><dd>{amountLabel(spend.currency, spend.budget)}</dd></div>
+        <div><dt>{t("Invoiced")}</dt><dd>{amountLabel(spend.currency, spend.invoiced)}</dd></div>
+        <div><dt>{t("Paid")}</dt><dd>{amountLabel(spend.currency, spend.paid)}</dd></div>
+        <div><dt>{t("Remaining")}</dt><dd className={spend.remaining != null && spend.remaining < 0 ? "negative" : ""}>{amountLabel(spend.currency, spend.remaining)}</dd></div>
+        {spend.overdue > 0 && <div><dt>{t("Overdue to pay")}</dt><dd className="negative">{amountLabel(spend.currency, spend.overdue)}</dd></div>}
+        {spend.disputed > 0 && <div><dt>{t("Disputed (not counted)")}</dt><dd>{amountLabel(spend.currency, spend.disputed)}</dd></div>}
       </dl>
     </section>}
 
     {manage && <form className="wf-card" onSubmit={add}>
-      <h3>Record an invoice</h3>
-      {!contract.currency && <p className="wf-hint warn">Set the contract currency on the Details tab first. Invoices are kept in the contract currency and never converted.</p>}
+      <h3>{t("Record an invoice")}</h3>
+      {!contract.currency && <p className="wf-hint warn">{t("Set the contract currency on the Details tab first. Invoices are kept in the contract currency and never converted.")}</p>}
       <div className="wf-grid">
-        <label className="wf-field">Invoice number<input value={form.invoice_number} onChange={e => setForm({ ...form, invoice_number: e.target.value })} placeholder="e.g. INV-1042" /></label>
-        <label className="wf-field">Amount {contract.currency ? `(${contract.currency})` : ""}<input required type="number" min="0.01" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} /></label>
-        <label className="wf-field">Invoice date<input type="date" value={form.invoice_date} onChange={e => setForm({ ...form, invoice_date: e.target.value })} /></label>
-        <label className="wf-field">Due date<input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} /></label>
-        <label className="wf-field">Status<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>{invoiceStatuses.map(s => <option key={s}>{s}</option>)}</select></label>
-        {obligations.length > 0 && <label className="wf-field">Settles payment obligation<select value={form.obligation_id} onChange={e => setForm({ ...form, obligation_id: e.target.value })}><option value="">None</option>{obligations.map(o => <option key={o.id} value={o.id}>{o.title}{o.due_date ? ` (${dateLabel(o.due_date)})` : ""}</option>)}</select></label>}
+        <label className="wf-field">{t("Invoice number")}<input value={form.invoice_number} onChange={e => setForm({ ...form, invoice_number: e.target.value })} placeholder={t("e.g. INV-1042")} /></label>
+        <label className="wf-field">{t("Amount")} {contract.currency ? `(${contract.currency})` : ""}<input required type="number" min="0.01" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} /></label>
+        <label className="wf-field">{t("Invoice date")}<input type="date" value={form.invoice_date} onChange={e => setForm({ ...form, invoice_date: e.target.value })} /></label>
+        <label className="wf-field">{t("Due date")}<input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })} /></label>
+        <label className="wf-field">{t("Status")}<select value={form.status} onChange={e => setForm({ ...form, status: e.target.value })}>{invoiceStatuses.map(s => <option key={s} value={s}>{t(s)}</option>)}</select></label>
+        {obligations.length > 0 && <label className="wf-field">{t("Settles payment obligation")}<select value={form.obligation_id} onChange={e => setForm({ ...form, obligation_id: e.target.value })}><option value="">{t("None")}</option>{obligations.map(o => <option key={o.id} value={o.id}>{o.title}{o.due_date ? ` (${dateLabel(o.due_date)})` : ""}</option>)}</select></label>}
       </div>
-      <button className="primary-button" disabled={busy || !form.amount || !contract.currency}>Add invoice</button>
+      <button className="primary-button" disabled={busy || !form.amount || !contract.currency}>{t("Add invoice")}</button>
     </form>}
     {message && <p className="form-error">{message}</p>}
 
-    {items.length === 0 ? <p className="wf-hint">No invoices recorded yet.</p> : <ul className="wf-list invoice-list">{items.map(item => <li key={item.id} className={item.overdue ? "overdue" : ""}>
+    {items.length === 0 ? <p className="wf-hint">{t("No invoices recorded yet.")}</p> : <ul className="wf-list invoice-list">{items.map(item => <li key={item.id} className={item.overdue ? "overdue" : ""}>
       <span className="wf-badge">{item.invoice_number ?? `#${item.id}`}</span>
       <div><strong>{amountLabel(item.currency, item.amount)}</strong>
-        <small>{[item.invoice_date ? `Dated ${dateLabel(item.invoice_date)}` : null, item.due_date ? `due ${dateLabel(item.due_date)}` : null,
-          item.overdue ? "overdue" : null, item.paid_at ? `paid ${dateLabel(item.paid_at)}` : null, item.obligation_title ? `settles “${item.obligation_title}”` : null].filter(Boolean).join(" · ") || `Recorded by ${item.created_by}`}</small></div>
-      {manage ? <select aria-label="Invoice status" value={item.status} disabled={busy} onChange={e => void run(() => api.updateInvoice(item.id, { status: e.target.value as Invoice["status"] }))}>{invoiceStatuses.map(s => <option key={s}>{s}</option>)}</select>
-        : <Status value={item.overdue ? "Overdue" : item.status === "Paid" ? "Done" : item.status} />}
-      {manage && <button className="wf-icon-link" aria-label="Delete invoice" disabled={busy} onClick={() => { if (window.confirm("Delete this invoice?")) void run(() => api.deleteInvoice(item.id)); }}><Trash2 size={16}/></button>}
+        <small>{[item.invoice_date ? t("Dated {date}", { date: dateLabel(item.invoice_date) }) : null, item.due_date ? t("due {date}", { date: dateLabel(item.due_date) }) : null,
+          item.overdue ? t("overdue") : null, item.paid_at ? t("paid {date}", { date: dateLabel(item.paid_at) }) : null, item.obligation_title ? t("settles “{title}”", { title: item.obligation_title }) : null].filter(Boolean).join(" · ") || t("Recorded by {name}", { name: item.created_by })}</small></div>
+      {manage ? <select aria-label={t("Invoice status")} value={item.status} disabled={busy} onChange={e => void run(() => api.updateInvoice(item.id, { status: e.target.value as Invoice["status"] }))}>{invoiceStatuses.map(s => <option key={s} value={s}>{t(s)}</option>)}</select>
+        : <Status value={item.overdue ? "Overdue" : item.status} />}
+      {manage && <button className="wf-icon-link" aria-label={t("Delete invoice")} disabled={busy} onClick={() => { if (window.confirm(t("Delete this invoice?"))) void run(() => api.deleteInvoice(item.id)); }}><Trash2 size={16}/></button>}
     </li>)}</ul>}
   </div>;
 }
@@ -107,18 +108,18 @@ export function SpendOverviewPanel({ onOpen }: { onOpen?: (id: number) => void }
   }, [level]);
   if (!data) return error ? <p className="form-error">{error}</p> : null;
   return <section className="panel spend-overview">
-    <div className="panel-title"><div><h2>Contract value used</h2><p>Contracts with invoices, most used first. {data.counts.over ? `${data.counts.over} over budget, ` : ""}{data.counts.warning} above {data.warn_percent}%.</p></div>
-      <select aria-label="Show" value={level} onChange={e => setLevel(e.target.value)}><option value="">All with invoices</option><option value="over">Over budget</option><option value="warning">Nearly used</option><option value="ok">Within budget</option></select></div>
-    {data.totals.length > 0 && <div className="family-totals">{data.totals.map(t => <div key={t.currency}><small>{t.currency}</small><strong>{t.invoiced.toLocaleString()} of {t.budget.toLocaleString()} invoiced</strong><small>{t.paid.toLocaleString()} paid</small></div>)}</div>}
+    <div className="panel-title"><div><h2>{t("Contract value used")}</h2><p>{t("Contracts with invoices, most used first.")} {data.counts.over ? t("{over} over budget, {warning} above {warn}%.", { over: data.counts.over, warning: data.counts.warning, warn: data.warn_percent }) : t("{warning} above {warn}%.", { warning: data.counts.warning, warn: data.warn_percent })}</p></div>
+      <select aria-label={t("Show")} value={level} onChange={e => setLevel(e.target.value)}><option value="">{t("All with invoices")}</option><option value="over">{t("Over budget")}</option><option value="warning">{t("Nearly used")}</option><option value="ok">{t("Within budget")}</option></select></div>
+    {data.totals.length > 0 && <div className="family-totals">{data.totals.map(total => <div key={total.currency}><small>{total.currency}</small><strong>{t("{invoiced} of {budget} invoiced", { invoiced: total.invoiced.toLocaleString(intlLocale()), budget: total.budget.toLocaleString(intlLocale()) })}</strong><small>{t("{paid} paid", { paid: total.paid.toLocaleString(intlLocale()) })}</small></div>)}</div>}
     <div className="table-wrap"><table className="wf-report">
-      <thead><tr><th>Contract</th><th className="num">Value</th><th className="num">Invoiced</th><th className="num">Paid</th><th className="num">Remaining</th><th>Used</th></tr></thead>
+      <thead><tr><th>{t("Contract")}</th><th className="num">{t("Value")}</th><th className="num">{t("Invoiced")}</th><th className="num">{t("Paid")}</th><th className="num">{t("Remaining")}</th><th>{t("Used")}</th></tr></thead>
       <tbody>{data.items.map(item => <tr key={item.contract_id} className={onOpen ? "click-row" : ""} onClick={() => onOpen?.(item.contract_id)}>
         <td><strong>{item.title}</strong><small className="wf-muted"> {item.vendor_name ?? ""}</small></td>
-        <td className="num">{amountLabel(item.currency, item.budget)}</td><td className="num">{item.invoiced.toLocaleString()}</td>
-        <td className="num">{item.paid.toLocaleString()}</td><td className={`num${item.remaining != null && item.remaining < 0 ? " negative" : ""}`}>{item.remaining != null ? item.remaining.toLocaleString() : "—"}</td>
-        <td className="spend-cell"><SpendMeter spend={{ ...item, warn_percent: data.warn_percent }} /><small>{item.percent != null ? `${item.percent}%` : "no value"}</small></td>
+        <td className="num">{amountLabel(item.currency, item.budget)}</td><td className="num">{item.invoiced.toLocaleString(intlLocale())}</td>
+        <td className="num">{item.paid.toLocaleString(intlLocale())}</td><td className={`num${item.remaining != null && item.remaining < 0 ? " negative" : ""}`}>{item.remaining != null ? item.remaining.toLocaleString(intlLocale()) : "—"}</td>
+        <td className="spend-cell"><SpendMeter spend={{ ...item, warn_percent: data.warn_percent }} /><small>{item.percent != null ? `${item.percent}%` : t("no value")}</small></td>
       </tr>)}
-      {!data.items.length && <tr><td colSpan={6} className="empty-cell">No invoices recorded{level ? " at this level" : ""}.</td></tr>}</tbody>
+      {!data.items.length && <tr><td colSpan={6} className="empty-cell">{level ? t("No invoices recorded at this level.") : t("No invoices recorded.")}</td></tr>}</tbody>
     </table></div>
   </section>;
 }

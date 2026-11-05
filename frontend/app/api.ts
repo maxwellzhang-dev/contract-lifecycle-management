@@ -1,3 +1,5 @@
+import { getLocale } from "./i18n";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "/backend-api";
 
 export const contractStatuses = ["Quoting", "Under Review", "Cleared to Start", "In Progress", "Completed", "On Hold", "Cancelled"] as const;
@@ -398,7 +400,10 @@ async function read<T>(response: Response): Promise<T> {
 }
 
 function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  return fetch(`${API_BASE}${path}`, { credentials: "include", ...init }).then(read<T>);
+  // The interface language, so AI answers come back in it.
+  const headers = new Headers(init.headers);
+  headers.set("X-Clause-Language", getLocale());
+  return fetch(`${API_BASE}${path}`, { credentials: "include", ...init, headers }).then(read<T>);
 }
 
 function json<T>(path: string, method: string, body?: unknown): Promise<T> {

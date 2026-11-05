@@ -6,7 +6,7 @@ import os
 import re
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from ..access import sees_everything, visibility_sql, visible_ids
@@ -119,6 +119,23 @@ class SearchIn(BaseModel):
     query: str
 
 
+LANGUAGE_NOTES = {
+    "zh": ("\n\nLANGUAGE: Write every free-text value (summaries, findings, recommendations, answers, explanations, "
+           "notes, key-term labels and values) in Simplified Chinese. Keep quotes exactly as written in the source, write "
+           "suggested contract wording in the language of the contract, and keep enum values, dates, numbers, ids and field "
+           "names unchanged."),
+}
+
+
+def ui_language(request: Request) -> str:
+    """The interface language the browser sent (X-Clause-Language), so answers come back in it."""
+    return "zh" if request.headers.get("x-clause-language", "").lower().startswith("zh") else "en"
+
+
+def in_language(prompt: str, language: str) -> str:
+    return prompt + LANGUAGE_NOTES.get(language, "")
+
+
 def call(*args, **kwargs) -> dict:
     try:
         return llm.structured(*args, **kwargs)
@@ -210,18 +227,19 @@ def clean_review(result: dict) -> dict:
     return result
 
 
-def generate_review(contract_id: int, actor: str) -> dict:
+def generate_review(contract_id: int, actor: str, language: str = "en") -> dict:
     """Run an AI review of the contract's current document and store it. Raises llm.LLMUnavailable."""
     with connection() as conn:
         contract = load_contract(conn, contract_id)
         rules = active_rules(conn)
     body, images = contract_material(contract)
     if rules:
-        result = llm.structured(REVIEW_PROMPT + PLAYBOOK_PROMPT, body + "\n\n" + playbook_block(rules), "contract_review",
+        result = llm.structured(in_language(REVIEW_PROMPT + PLAYBOOK_PROMPT, language), body + "\n\n" + playbook_block(rules), "contract_review",
                                 PLAYBOOK_REVIEW_SCHEMA, images=images, effort="medium")
         result = clean_playbook(clean_review(result), rules)
     else:
-        result = clean_review(llm.structured(REVIEW_PROMPT, body, "contract_review", REVIEW_SCHEMA, images=images, effort="medium"))
+        result = clean_review(llm.structured(in_language(REVIEW_PROMPT, language), body, "contract_review", REVIEW_SCHEMA,
+                                             images=images, effort="medium"))
     with connection() as conn:
         cursor = conn.execute(
             "INSERT INTO ai_reviews (contract_id, document_version, result, model, created_by, created_at) VALUES (?,?,?,?,?,?)",
@@ -292,11 +310,11 @@ def review_job_pending(conn, request_id: int) -> bool:
 
 
 @router.post("/contracts/{contract_id}/ai/review", status_code=201)
-def run_review(contract_id: int, user: dict = Depends(require("ai.use"))):
+def run_review(contract_id: int, user: dict = Depends(require("ai.use")), language: str = Depends(ui_language)):
     with connection() as conn:
         load_contract(conn, contract_id)
     try:
-        return generate_review(contract_id, user["name"])
+        return generate_review(contract_id, user["name"], language)
     except llm.LLMUnavailable as exc:
         raise HTTPException(503, str(exc))
 
@@ -313,7 +331,7 @@ def question_history(contract_id: int, _: dict = Depends(current_user)):
 
 
 @router.post("/contracts/{contract_id}/ai/questions", status_code=201)
-def ask(contract_id: int, body: QuestionIn, user: dict = Depends(require("ai.use"))):
+def ask(contract_id: int, body: QuestionIn, user: dict = Depends(require("ai.use")), language: str = Depends(ui_language)):
     question = body.question.strip()
     if not question:
         raise HTTPException(422, "Ask a question.")
@@ -322,7 +340,7 @@ def ask(contract_id: int, body: QuestionIn, user: dict = Depends(require("ai.use
     with connection() as conn:
         contract = load_contract(conn, contract_id)
     material, images = contract_material(contract)
-    answer = call(QUESTION_PROMPT, f"{material}\n\nQUESTION\n{question}", "contract_answer", QUESTION_SCHEMA, images=images)
+    answer = call(in_language(QUESTION_PROMPT, language), f"{material}\n\nQUESTION\n{question}", "contract_answer", QUESTION_SCHEMA, images=images)
     with connection() as conn:
         cursor = conn.execute(
             "INSERT INTO ai_questions (contract_id, user_id, question, answer, document_version, created_at) VALUES (?,?,?,?,?,?)",
@@ -336,7 +354,7 @@ def ask(contract_id: int, body: QuestionIn, user: dict = Depends(require("ai.use
 
 
 @router.post("/contracts/{contract_id}/ai/compare")
-def compare(contract_id: int, body: CompareIn, user: dict = Depends(require("ai.use"))):
+def compare(contract_id: int, body: CompareIn, user: dict = Depends(require("ai.use")), language: str = Depends(ui_language)):
     if body.from_version == body.to_version:
         raise HTTPException(422, "Choose two different versions.")
     with connection() as conn:
@@ -354,7 +372,7 @@ def compare(contract_id: int, body: CompareIn, user: dict = Depends(require("ai.
         texts[version] = text
     material = (f"VERSION {body.from_version} (older)\n{texts[body.from_version]}\n\n"
                 f"VERSION {body.to_version} (newer)\n{texts[body.to_version]}")
-    result = call(COMPARE_PROMPT, material, "version_comparison", COMPARE_SCHEMA, effort="medium")
+    result = call(in_language(COMPARE_PROMPT, language), material, "version_comparison", COMPARE_SCHEMA, effort="medium")
     with connection() as conn:
         add_audit(conn, "AI version comparison", user["name"], contract_id,
                   f"v{body.from_version} → v{body.to_version}: {len(result['changes'])} change(s)")
@@ -373,7 +391,7 @@ def known_values(conn, user: dict) -> dict[str, list[str]]:
 
 
 @router.post("/ai/search")
-def natural_search(body: SearchIn, user: dict = Depends(require("ai.use"))):
+def natural_search(body: SearchIn, user: dict = Depends(require("ai.use")), language: str = Depends(ui_language)):
     query = body.query.strip()
     if not query or len(query) > 500:
         raise HTTPException(422, "Describe the contracts you are looking for (up to 500 characters).")
@@ -381,7 +399,7 @@ def natural_search(body: SearchIn, user: dict = Depends(require("ai.use"))):
         known = known_values(conn, user)
     prompt = (f"TODAY: {date.today().isoformat()}\nKNOWN VALUES\n"
               + "\n".join(f"{k}: {json.dumps(v)}" for k, v in known.items()) + f"\n\nREQUEST\n{query}")
-    result = call(SEARCH_PROMPT, prompt, "contract_filters", SEARCH_SCHEMA)
+    result = call(in_language(SEARCH_PROMPT, language), prompt, "contract_filters", SEARCH_SCHEMA)
     # Keep only values that exist, with their exact spelling, so the filters always match something real.
     for key, values in known.items():
         if result.get(key):
@@ -483,7 +501,7 @@ def portfolio_history(user: dict = Depends(require("ai.use"))):
 
 
 @router.post("/ai/portfolio", status_code=201)
-def ask_portfolio(body: QuestionIn, user: dict = Depends(require("ai.use"))):
+def ask_portfolio(body: QuestionIn, user: dict = Depends(require("ai.use")), language: str = Depends(ui_language)):
     question = body.question.strip()
     if not question:
         raise HTTPException(422, "Ask a question.")
@@ -491,7 +509,7 @@ def ask_portfolio(body: QuestionIn, user: dict = Depends(require("ai.use"))):
         raise HTTPException(422, f"Questions are limited to {MAX_QUESTION} characters.")
     with connection() as conn:
         material = portfolio_material(conn, user)
-    answer = call(PORTFOLIO_PROMPT, f"TODAY: {date.today().isoformat()}\n\n{material}\n\nQUESTION\n{question}",
+    answer = call(in_language(PORTFOLIO_PROMPT, language), f"TODAY: {date.today().isoformat()}\n\n{material}\n\nQUESTION\n{question}",
                   "portfolio_answer", PORTFOLIO_SCHEMA, effort="medium")
     with connection() as conn:
         cursor = conn.execute(
@@ -542,11 +560,11 @@ def rag_reindex(user: dict = Depends(require("user.manage"))):
     return {"queued": len(ids)}
 
 
-def rag_query(question: str) -> dict:
+def rag_query(question: str, language: str = "en") -> dict:
     from lightrag import QueryParam
 
     param = QueryParam(mode=os.getenv("RAG_QUERY_MODE", "mix"), include_references=True, enable_rerank=False,
-                       response_type="Short paragraphs", user_prompt=RAG_PROMPT)
+                       response_type="Short paragraphs", user_prompt=in_language(RAG_PROMPT, language))
     try:
         return rag.service.run(lambda instance: instance.aquery_llm(question, param))
     except rag.RagUnavailable as exc:
@@ -557,7 +575,7 @@ def rag_query(question: str) -> dict:
 
 
 @router.post("/ai/rag/ask", status_code=201)
-def rag_ask(body: QuestionIn, user: dict = Depends(require("ai.use"))):
+def rag_ask(body: QuestionIn, user: dict = Depends(require("ai.use")), language: str = Depends(ui_language)):
     question = body.question.strip()
     if not question:
         raise HTTPException(422, "Ask a question.")
@@ -568,7 +586,7 @@ def rag_ask(body: QuestionIn, user: dict = Depends(require("ai.use"))):
     if not sees_everything(user):
         # The document index spans every contract and cannot yet be limited per user.
         raise HTTPException(403, "Document search is available to users who can see all contracts.")
-    result = rag_query(question)
+    result = rag_query(question, language)
     if result.get("status") not in (None, "success"):
         raise HTTPException(503, f"Document search failed: {result.get('message', 'unknown error')}")
     data = result.get("data") or {}

@@ -3,6 +3,7 @@
 import { KeyboardEvent, useState } from "react";
 import { X } from "lucide-react";
 import { API_BASE, type Contract } from "./api";
+import { t } from "./i18n";
 
 export type Filters = {
   status: string;
@@ -38,7 +39,7 @@ export function filterContracts(contracts: Contract[], search: string, f: Filter
     if (f.department && c.department !== f.department) return false;
     if (f.owner && c.owner !== f.owner) return false;
     if (f.currency && c.currency !== f.currency) return false;
-    if (f.tag && !(c.tags ?? []).some(t => t.toLowerCase() === f.tag.toLowerCase())) return false;
+    if (f.tag && !(c.tags ?? []).some(tag => tag.toLowerCase() === f.tag.toLowerCase())) return false;
     if (min !== null && totalValue(c) < min) return false;
     if (max !== null && totalValue(c) > max) return false;
     if (f.endFrom && (!c.project_end_date || c.project_end_date < f.endFrom)) return false;
@@ -75,31 +76,31 @@ export function AdvancedFilters({ contracts, filters, setFilters }: { contracts:
     currency: distinct(contracts.map(c => c.currency)),
   };
   const select = (key: "vendor" | "department" | "owner" | "tag" | "currency", label: string) =>
-    <label className="wf-field">{label}<select value={filters[key]} onChange={e => set(key)(e.target.value)}><option value="">Any</option>{options[key].map(v => <option key={v}>{v}</option>)}</select></label>;
+    <label className="wf-field">{t(label)}<select value={filters[key]} onChange={e => set(key)(e.target.value)}><option value="">{t("Any")}</option>{options[key].map(v => <option key={v}>{v}</option>)}</select></label>;
   return <div className="wf-filters panel">
     {select("vendor", "Vendor")}
     {select("department", "Department")}
     {select("owner", "Owner")}
     {select("tag", "Tag")}
     {select("currency", "Currency")}
-    <label className="wf-field">Total value from<input type="number" min="0" inputMode="decimal" value={filters.minValue} onChange={e => set("minValue")(e.target.value)} /></label>
-    <label className="wf-field">Total value to<input type="number" min="0" inputMode="decimal" value={filters.maxValue} onChange={e => set("maxValue")(e.target.value)} /></label>
-    <label className="wf-field">Ends on or after<input type="date" value={filters.endFrom} onChange={e => set("endFrom")(e.target.value)} /></label>
-    <label className="wf-field">Ends on or before<input type="date" value={filters.endTo} onChange={e => set("endTo")(e.target.value)} /></label>
-    <button type="button" className="secondary-button" disabled={!activeFilterCount(filters)} onClick={() => setFilters(emptyFilters)}>Clear filters</button>
+    <label className="wf-field">{t("Total value from")}<input type="number" min="0" inputMode="decimal" value={filters.minValue} onChange={e => set("minValue")(e.target.value)} /></label>
+    <label className="wf-field">{t("Total value to")}<input type="number" min="0" inputMode="decimal" value={filters.maxValue} onChange={e => set("maxValue")(e.target.value)} /></label>
+    <label className="wf-field">{t("Ends on or after")}<input type="date" value={filters.endFrom} onChange={e => set("endFrom")(e.target.value)} /></label>
+    <label className="wf-field">{t("Ends on or before")}<input type="date" value={filters.endTo} onChange={e => set("endTo")(e.target.value)} /></label>
+    <button type="button" className="secondary-button" disabled={!activeFilterCount(filters)} onClick={() => setFilters(emptyFilters)}>{t("Clear filters")}</button>
   </div>;
 }
 
 export function Tags({ tags }: { tags?: string[] }) {
   if (!tags?.length) return null;
-  return <span className="wf-tags">{tags.map(t => <span key={t} className="wf-tag">{t}</span>)}</span>;
+  return <span className="wf-tags">{tags.map(tag => <span key={tag} className="wf-tag">{tag}</span>)}</span>;
 }
 
 export function TagEditor({ value, onChange, disabled, suggestions }: { value: string[]; onChange: (tags: string[]) => void; disabled?: boolean; suggestions: string[] }) {
   const [draft, setDraft] = useState("");
   function add(raw: string) {
     const tag = raw.trim().replace(/\s+/g, " ").slice(0, 30);
-    if (tag && !value.some(t => t.toLowerCase() === tag.toLowerCase()) && value.length < 10) onChange([...value, tag]);
+    if (tag && !value.some(v => v.toLowerCase() === tag.toLowerCase()) && value.length < 10) onChange([...value, tag]);
     setDraft("");
   }
   function key(event: KeyboardEvent<HTMLInputElement>) {
@@ -107,8 +108,8 @@ export function TagEditor({ value, onChange, disabled, suggestions }: { value: s
     if (event.key === "Backspace" && !draft && value.length) onChange(value.slice(0, -1));
   }
   return <div className="wf-tag-editor">
-    {value.map(t => <span key={t} className="wf-tag">{t}{!disabled && <button type="button" aria-label={`Remove tag ${t}`} onClick={() => onChange(value.filter(x => x !== t))}><X size={12}/></button>}</span>)}
-    {!disabled && value.length < 10 && <input list="tag-suggestions" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={key} onBlur={() => draft && add(draft)} placeholder={value.length ? "Add tag" : "Add tags, press Enter"} aria-label="Add tag" />}
+    {value.map(tag => <span key={tag} className="wf-tag">{tag}{!disabled && <button type="button" aria-label={t("Remove tag {tag}", { tag })} onClick={() => onChange(value.filter(x => x !== tag))}><X size={12}/></button>}</span>)}
+    {!disabled && value.length < 10 && <input list="tag-suggestions" value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={key} onBlur={() => draft && add(draft)} placeholder={value.length ? t("Add tag") : t("Add tags, press Enter")} aria-label={t("Add tag")} />}
     <datalist id="tag-suggestions">{suggestions.filter(s => !value.includes(s)).map(s => <option key={s} value={s} />)}</datalist>
   </div>;
 }

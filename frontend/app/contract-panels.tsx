@@ -11,10 +11,10 @@ import {
 } from "./api";
 import { AuditDetails, Status, amountLabel, dateLabel, dateTimeLabel, errorText, initials, roleLabel } from "./shared";
 import { PlaybookSummary, playbookStatusLabels } from "./playbook";
+import { t, tn } from "./i18n";
 
 type PanelProps = { contract: Contract; user: User; onChanged: (contract: Contract) => Promise<void> };
 
-/** Load data for a panel, re-running whenever `key` changes. */
 function useLoad<T>(load: () => Promise<T>, key: unknown) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState("");
@@ -27,7 +27,7 @@ function useLoad<T>(load: () => Promise<T>, key: unknown) {
     // `load` is a fresh closure every render; `key` says when its inputs really changed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, tick]);
-  return { data, error, reload: () => setTick(t => t + 1) };
+  return { data, error, reload: () => setTick(n => n + 1) };
 }
 
 // --- approvals -----------------------------------------------------------------------
@@ -55,20 +55,20 @@ export function ApprovalsPanel({ contract, user, onChanged }: PanelProps) {
   return <div className="wf-panel">
     {error && <p className="form-error">{error}</p>}
     {pending && <ApprovalCard request={pending} user={user} comment={comment} setComment={setComment} busy={busy}
-      onDecide={(decision) => act(() => api.decide(pending.id, decision, comment), decision === "approve" ? "Step approved." : "Request rejected.")}
-      onWithdraw={() => act(() => api.withdraw(pending.id), "Request withdrawn.")} />}
-    {!pending && contract.status === "Quoting" && (canSubmit ? <form className="wf-card" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api.submitApproval(contract.id, chain, note), "Submitted for approval."); }}>
-      <h3>Submit for approval</h3>
-      {contract.validation_status !== "Validated" && <p className="wf-hint warn">Confirm and validate the contract details first (Details tab).</p>}
-      <p className="wf-hint">Approvers sign off in this order. Each step needs a different person, and you cannot approve your own request.</p>
-      <div className="wf-chain">{chain.map((role, index) => <span key={role} className="wf-chip active">{index + 1}. {roleLabel(role)}<button type="button" aria-label={`Remove ${role}`} onClick={() => toggle(role)}><X size={13}/></button></span>)}
+      onDecide={(decision) => act(() => api.decide(pending.id, decision, comment), decision === "approve" ? t("Step approved.") : t("Request rejected."))}
+      onWithdraw={() => act(() => api.withdraw(pending.id), t("Request withdrawn."))} />}
+    {!pending && contract.status === "Quoting" && (canSubmit ? <form className="wf-card" onSubmit={(e: FormEvent) => { e.preventDefault(); void act(() => api.submitApproval(contract.id, chain, note), t("Submitted for approval.")); }}>
+      <h3>{t("Submit for approval")}</h3>
+      {contract.validation_status !== "Validated" && <p className="wf-hint warn">{t("Confirm and validate the contract details first (Details tab).")}</p>}
+      <p className="wf-hint">{t("Approvers sign off in this order. Each step needs a different person, and you cannot approve your own request.")}</p>
+      <div className="wf-chain">{chain.map((role, index) => <span key={role} className="wf-chip active">{index + 1}. {roleLabel(role)}<button type="button" aria-label={t("Remove {role}", { role: roleLabel(role) })} onClick={() => toggle(role)}><X size={13}/></button></span>)}
         {approverRoles.filter(role => !chain.includes(role)).map(role => <button type="button" key={role} className="wf-chip" onClick={() => toggle(role)}><Plus size={13}/>{roleLabel(role)}</button>)}</div>
-      <label className="wf-field">Note for approvers<textarea value={note} onChange={e => setNote(e.target.value)} placeholder="Optional context, e.g. budget line or urgency"/></label>
-      <button className="primary-button" disabled={busy || !chain.length || contract.validation_status !== "Validated"}>Submit for approval</button>
-    </form> : <p className="wf-hint">This contract has not been submitted for approval.</p>)}
-    {!pending && contract.status !== "Quoting" && !past.length && <p className="wf-hint">No approval history for this contract.</p>}
+      <label className="wf-field">{t("Note for approvers")}<textarea value={note} onChange={e => setNote(e.target.value)} placeholder={t("Optional context, e.g. budget line or urgency")}/></label>
+      <button className="primary-button" disabled={busy || !chain.length || contract.validation_status !== "Validated"}>{t("Submit for approval")}</button>
+    </form> : <p className="wf-hint">{t("This contract has not been submitted for approval.")}</p>)}
+    {!pending && contract.status !== "Quoting" && !past.length && <p className="wf-hint">{t("No approval history for this contract.")}</p>}
     {message && <p className="save-message">{message}</p>}
-    {past.length > 0 && <><h4 className="wf-subhead">History</h4>{past.map(request => <ApprovalCard key={request.id} request={request} user={user} />)}</>}
+    {past.length > 0 && <><h4 className="wf-subhead">{t("History")}</h4>{past.map(request => <ApprovalCard key={request.id} request={request} user={user} />)}</>}
   </div>;
 }
 
@@ -82,37 +82,37 @@ function ApprovalCard({ request, user, comment, setComment, busy, onDecide, onWi
     && request.submitted_by !== user.id && !decidedByMe;
   const canWithdraw = request.status === "Pending" && (request.submitted_by === user.id || user.role === "admin");
   return <article className="wf-card">
-    <header className="wf-card-head"><div><h3>Approval request #{request.id}</h3><small>Submitted by {request.submitted_by_name} · {dateTimeLabel(request.submitted_at)}</small></div><Status value={request.status} /></header>
+    <header className="wf-card-head"><div><h3>{t("Approval request #{n}", { n: request.id })}</h3><small>{t("Submitted by {name} · {when}", { name: request.submitted_by_name, when: dateTimeLabel(request.submitted_at) })}</small></div><Status value={request.status} /></header>
     {request.note && <p className="wf-note">“{request.note}”</p>}
     {request.status === "Pending" && <AiBrief request={request} />}
     <ol className="wf-steps">{request.steps.map(step => <li key={step.id} className={`wf-step ${step.status.toLowerCase()}`}>
       <span className="wf-step-dot">{step.status === "Approved" ? <Check size={13}/> : step.status === "Rejected" ? <X size={13}/> : step.step_order}</span>
-      <div><strong>{roleLabel(step.role)}</strong><small>{step.status === "Pending" ? "Waiting for decision" : step.status === "Waiting" ? "After previous step" : step.decided_by_name ? `${step.status} by ${step.decided_by_name} · ${dateTimeLabel(step.decided_at)}` : step.status}</small>{step.comment && <p>{step.comment}</p>}</div>
+      <div><strong>{roleLabel(step.role)}</strong><small>{step.status === "Pending" ? t("Waiting for decision") : step.status === "Waiting" ? t("After previous step") : step.decided_by_name ? t("{status} by {name} · {when}", { status: t(step.status), name: step.decided_by_name, when: dateTimeLabel(step.decided_at) }) : t(step.status)}</small>{step.comment && <p>{step.comment}</p>}</div>
     </li>)}</ol>
     {canDecide && setComment && <div className="wf-decide">
-      <label className="wf-field">Comment<textarea value={comment} onChange={e => setComment(e.target.value)} placeholder="Required when rejecting"/></label>
-      <div className="wf-actions"><button className="danger-button" disabled={busy} onClick={() => onDecide?.("reject")}>Reject</button><button className="primary-button" disabled={busy} onClick={() => onDecide?.("approve")}>Approve as {roleLabel(current!.role)}</button></div>
+      <label className="wf-field">{t("Comment")}<textarea value={comment} onChange={e => setComment(e.target.value)} placeholder={t("Required when rejecting")}/></label>
+      <div className="wf-actions"><button className="danger-button" disabled={busy} onClick={() => onDecide?.("reject")}>{t("Reject")}</button><button className="primary-button" disabled={busy} onClick={() => onDecide?.("approve")}>{t("Approve as {role}", { role: roleLabel(current!.role) })}</button></div>
     </div>}
-    {!canDecide && current && request.status === "Pending" && <p className="wf-hint">Waiting for a {current.role} approver{request.submitted_by === user.id ? " (you submitted this request)" : ""}.</p>}
-    {canWithdraw && onWithdraw && <button className="secondary-button" disabled={busy} onClick={onWithdraw}>Withdraw request</button>}
+    {!canDecide && current && request.status === "Pending" && <p className="wf-hint">{request.submitted_by === user.id ? t("Waiting for a {role} approver (you submitted this request).", { role: roleLabel(current.role) }) : t("Waiting for a {role} approver.", { role: roleLabel(current.role) })}</p>}
+    {canWithdraw && onWithdraw && <button className="secondary-button" disabled={busy} onClick={onWithdraw}>{t("Withdraw request")}</button>}
   </article>;
 }
 
 function AiBrief({ request }: { request: ApprovalRequest }) {
   const brief = request.ai_review;
   if (!brief) {
-    if (request.ai_review_state === "running") return <p className="wf-hint ai-brief-running">AI review of the submitted document is running… refresh in a minute.</p>;
+    if (request.ai_review_state === "running") return <p className="wf-hint ai-brief-running">{t("AI review of the submitted document is running… refresh in a minute.")}</p>;
     return null;
   }
   const { high, medium, low } = brief.risk_counts;
   return <div className={high ? "ai-brief high" : "ai-brief"}>
-    <div className="ai-brief-head"><strong>AI review for approvers</strong><span className="ai-sev high">{high} high</span><span className="ai-sev medium">{medium} medium</span><span className="ai-sev low">{low} low</span></div>
+    <div className="ai-brief-head"><strong>{t("AI review for approvers")}</strong><span className="ai-sev high">{t("{n} high", { n: high })}</span><span className="ai-sev medium">{t("{n} medium", { n: medium })}</span><span className="ai-sev low">{t("{n} low", { n: low })}</span></div>
     <p>{brief.summary}</p>
-    {brief.top_risks.length > 0 && <ul>{brief.top_risks.map((r, i) => <li key={i}><span className={`ai-sev ${r.severity}`}>{r.severity}</span> {r.category}: {r.finding}</li>)}</ul>}
+    {brief.top_risks.length > 0 && <ul>{brief.top_risks.map((r, i) => <li key={i}><span className={`ai-sev ${r.severity}`}>{t(r.severity)}</span> {t(r.category)}: {r.finding}</li>)}</ul>}
     {brief.playbook_counts && <PlaybookSummary counts={brief.playbook_counts} />}
-    {brief.playbook_issues?.length > 0 && <ul>{brief.playbook_issues.map((p, i) => <li key={i}><span className={`playbook-status ${p.status}`}>{playbookStatusLabels[p.status]}</span> {p.title}: {p.finding}</li>)}</ul>}
-    {brief.missing_clauses.length > 0 && <small>Possibly missing: {brief.missing_clauses.join(", ")}</small>}
-    <small>Document v{brief.document_version} · see the AI assistant tab for quotes and details. AI output can be wrong.</small>
+    {brief.playbook_issues?.length > 0 && <ul>{brief.playbook_issues.map((p, i) => <li key={i}><span className={`playbook-status ${p.status}`}>{t(playbookStatusLabels[p.status])}</span> {p.title}: {p.finding}</li>)}</ul>}
+    {brief.missing_clauses.length > 0 && <small>{t("Possibly missing: {items}", { items: brief.missing_clauses.join(", ") })}</small>}
+    <small>{t("Document v{n} · see the AI assistant tab for quotes and details. AI output can be wrong.", { n: brief.document_version })}</small>
   </div>;
 }
 
@@ -124,14 +124,14 @@ export function VersionsPanel({ contract, user, onChanged }: PanelProps) {
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const blocked = contract.pending_approval_id ? "Withdraw the pending approval before uploading a new version."
-    : ["Completed", "Cancelled"].includes(contract.status) ? `${contract.status} contracts cannot receive new versions.` : "";
+  const blocked = contract.pending_approval_id ? t("Withdraw the pending approval before uploading a new version.")
+    : ["Completed", "Cancelled"].includes(contract.status) ? t("{status} contracts cannot receive new versions.", { status: t(contract.status) }) : "";
 
   async function submit(event: FormEvent) {
     event.preventDefault(); if (!file) return;
     setBusy(true); setMessage("");
     const form = new FormData(); form.append("file", file); form.append("note", note);
-    try { const updated = await api.uploadVersion(contract.id, form); setFile(null); setNote(""); reload(); await onChanged(updated); setMessage(`Version ${updated.document_version} uploaded. Re-validate the details against the new document.`); }
+    try { const updated = await api.uploadVersion(contract.id, form); setFile(null); setNote(""); reload(); await onChanged(updated); setMessage(t("Version {n} uploaded. Re-validate the details against the new document.", { n: updated.document_version })); }
     catch (err) { setMessage(errorText(err, "Upload failed")); }
     finally { setBusy(false); }
   }
@@ -139,19 +139,19 @@ export function VersionsPanel({ contract, user, onChanged }: PanelProps) {
   return <div className="wf-panel">
     {error && <p className="form-error">{error}</p>}
     {can(user, "contract.edit") && (blocked ? <p className="wf-hint">{blocked}</p> : <form className="wf-card" onSubmit={submit}>
-      <h3>Upload a new version</h3>
-      <p className="wf-hint">The previous file is kept. The record goes back to the review queue for validation.</p>
+      <h3>{t("Upload a new version")}</h3>
+      <p className="wf-hint">{t("The previous file is kept. The record goes back to the review queue for validation.")}</p>
       <input type="file" accept=".pdf,.docx,.png,.jpg,.jpeg,.webp" onChange={e => setFile(e.target.files?.[0] ?? null)} />
-      <label className="wf-field">What changed?<input value={note} onChange={e => setNote(e.target.value)} placeholder="e.g. Vendor redlines on liability"/></label>
-      <button className="primary-button" disabled={!file || busy}>{busy ? "Uploading…" : "Upload version"}</button>
+      <label className="wf-field">{t("What changed?")}<input value={note} onChange={e => setNote(e.target.value)} placeholder={t("e.g. Vendor redlines on liability")}/></label>
+      <button className="primary-button" disabled={!file || busy}>{busy ? t("Uploading…") : t("Upload version")}</button>
     </form>)}
     {message && <p className="save-message">{message}</p>}
-    {versions && !versions.length && <p className="wf-hint">No documents uploaded for this contract.</p>}
+    {versions && !versions.length && <p className="wf-hint">{t("No documents uploaded for this contract.")}</p>}
     {!!versions?.length && <ul className="wf-list">{versions.map((v: Version) => <li key={v.id}>
       <span className="wf-badge">v{v.version}</span>
-      <div><strong>{v.file_name ?? "Document"}</strong><small>{v.uploaded_by ?? "Unknown"} · {dateTimeLabel(v.uploaded_at)}{v.file_size ? ` · ${(v.file_size / 1024).toFixed(0)} KB` : ""}</small>{v.note && <p>{v.note}</p>}</div>
-      {v.version === contract.document_version && <em className="wf-current">Current</em>}
-      <a className="wf-icon-link" href={fileUrl(contract.id, v.version)} target="_blank" rel="noreferrer" aria-label={`Open version ${v.version}`}><Download size={16}/></a>
+      <div><strong>{v.file_name ?? t("Document")}</strong><small>{v.uploaded_by ?? t("Unknown")} · {dateTimeLabel(v.uploaded_at)}{v.file_size ? ` · ${(v.file_size / 1024).toFixed(0)} KB` : ""}</small>{v.note && <p>{v.note}</p>}</div>
+      {v.version === contract.document_version && <em className="wf-current">{t("Current")}</em>}
+      <a className="wf-icon-link" href={fileUrl(contract.id, v.version)} target="_blank" rel="noreferrer" aria-label={t("Open version {n}", { n: v.version })}><Download size={16}/></a>
     </li>)}</ul>}
   </div>;
 }
@@ -186,26 +186,26 @@ export function ObligationsPanel({ contract, user }: PanelProps) {
 
   return <div className="wf-panel">
     {error && <p className="form-error">{error}</p>}
-    <a className="secondary-button wf-ics-link" href={contractCalendarUrl(contract.id)} download><CalendarPlus size={14}/> Add this contract’s dates to my calendar (.ics)</a>
+    <a className="secondary-button wf-ics-link" href={contractCalendarUrl(contract.id)} download><CalendarPlus size={14}/> {t("Add this contract’s dates to my calendar (.ics)")}</a>
     {manage && <form className="wf-card wf-obligation-form" onSubmit={add}>
-      <h3>Add obligation or milestone</h3>
+      <h3>{t("Add obligation or milestone")}</h3>
       <div className="wf-grid">
-        <label className="wf-field wide">Title<input required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="e.g. Go-live sign-off"/></label>
-        <label className="wf-field">Type<select value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value })}>{obligationKinds.map(k => <option key={k}>{k}</option>)}</select></label>
-        <label className="wf-field">Due date<input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })}/></label>
-        <label className="wf-field">Amount {contract.currency ? `(${contract.currency})` : ""}<input type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}/></label>
-        <label className="wf-field">Owner<input list="people" value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })} placeholder="Gets the reminders"/></label>
+        <label className="wf-field wide">{t("Title")}<input required value={form.title} onChange={e => setForm({ ...form, title: e.target.value })} placeholder={t("e.g. Go-live sign-off")}/></label>
+        <label className="wf-field">{t("Type")}<select value={form.kind} onChange={e => setForm({ ...form, kind: e.target.value })}>{obligationKinds.map(k => <option key={k} value={k}>{t(k)}</option>)}</select></label>
+        <label className="wf-field">{t("Due date")}<input type="date" value={form.due_date} onChange={e => setForm({ ...form, due_date: e.target.value })}/></label>
+        <label className="wf-field">{t("Amount")} {contract.currency ? `(${contract.currency})` : ""}<input type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })}/></label>
+        <label className="wf-field">{t("Owner")}<input list="people" value={form.owner} onChange={e => setForm({ ...form, owner: e.target.value })} placeholder={t("Gets the reminders")}/></label>
       </div>
       <datalist id="people">{(people as DirectoryEntry[] | null)?.map(p => <option key={p.id} value={p.name}/>)}</datalist>
-      <button className="primary-button" disabled={busy || !form.title.trim()}>Add</button>
+      <button className="primary-button" disabled={busy || !form.title.trim()}>{t("Add")}</button>
     </form>}
     {message && <p className="form-error">{message}</p>}
-    {items && !items.length && <p className="wf-hint">No obligations recorded yet.</p>}
+    {items && !items.length && <p className="wf-hint">{t("No obligations recorded yet.")}</p>}
     {!!items?.length && <ul className="wf-list">{items.map((item: Obligation) => <li key={item.id} className={item.overdue ? "overdue" : ""}>
-      <span className="wf-badge">{item.kind}</span>
-      <div><strong>{item.title}</strong><small>{item.due_date ? `Due ${dateLabel(item.due_date)}` : "No due date"}{item.overdue ? ` · ${-item.days_until_due!} days overdue` : ""}{item.amount != null ? ` · ${amountLabel(item.currency, item.amount)}` : ""}{item.owner ? ` · ${item.owner}` : ""}</small>{item.completed_by && <small>{item.status} by {item.completed_by} · {dateLabel(item.completed_at)}</small>}</div>
-      {manage ? <select aria-label="Obligation status" value={item.status} disabled={busy} onChange={e => void run(() => api.updateObligation(item.id, { status: e.target.value }))}>{obligationStatuses.map(s => <option key={s}>{s}</option>)}</select> : <Status value={item.overdue ? "Overdue" : item.status}/>}
-      {manage && <button className="wf-icon-link" aria-label="Remove obligation" disabled={busy} onClick={() => { if (window.confirm(`Remove “${item.title}”?`)) void run(() => api.deleteObligation(item.id)); }}><Trash2 size={16}/></button>}
+      <span className="wf-badge">{t(item.kind)}</span>
+      <div><strong>{item.title}</strong><small>{item.due_date ? t("Due {date}", { date: dateLabel(item.due_date) }) : t("No due date")}{item.overdue ? ` · ${tn(-item.days_until_due!, "{n} day overdue", "{n} days overdue")}` : ""}{item.amount != null ? ` · ${amountLabel(item.currency, item.amount)}` : ""}{item.owner ? ` · ${item.owner}` : ""}</small>{item.completed_by && <small>{t("{status} by {name} · {when}", { status: t(item.status), name: item.completed_by, when: dateLabel(item.completed_at) })}</small>}</div>
+      {manage ? <select aria-label={t("Obligation status")} value={item.status} disabled={busy} onChange={e => void run(() => api.updateObligation(item.id, { status: e.target.value }))}>{obligationStatuses.map(s => <option key={s} value={s}>{t(s)}</option>)}</select> : <Status value={item.overdue ? "Overdue" : item.status}/>}
+      {manage && <button className="wf-icon-link" aria-label={t("Remove obligation")} disabled={busy} onClick={() => { if (window.confirm(t("Remove “{title}”?", { title: item.title }))) void run(() => api.deleteObligation(item.id)); }}><Trash2 size={16}/></button>}
     </li>)}</ul>}
   </div>;
 }
@@ -236,17 +236,17 @@ export function CommentsPanel({ contract, user }: PanelProps) {
 
   return <div className="wf-panel">
     {error && <p className="form-error">{error}</p>}
-    {comments && !comments.length && <p className="wf-hint">No comments yet. Start the discussion below.</p>}
+    {comments && !comments.length && <p className="wf-hint">{t("No comments yet. Start the discussion below.")}</p>}
     <ul className="wf-comments">{comments?.map((c: Comment) => <li key={c.id}>
       <span className="audit-avatar">{initials(c.author_name)}</span>
       <div><header><strong>{c.author_name}</strong><small>{roleLabel(c.author_role)} · {dateTimeLabel(c.created_at)}</small>
-        {(c.user_id === user.id || user.role === "admin") && <button className="wf-link" disabled={busy} onClick={() => { if (window.confirm("Delete this comment?")) void run(() => api.deleteComment(c.id)); }}>Delete</button>}</header>
+        {(c.user_id === user.id || user.role === "admin") && <button className="wf-link" disabled={busy} onClick={() => { if (window.confirm(t("Delete this comment?"))) void run(() => api.deleteComment(c.id)); }}>{t("Delete")}</button>}</header>
         <CommentBody text={c.body} names={names} /></div>
     </li>)}</ul>
     <form className="wf-card" onSubmit={(e: FormEvent) => { e.preventDefault(); void run(async () => { await api.addComment(contract.id, text); setText(""); }); }}>
-      <label className="wf-field">Add a comment<textarea value={text} maxLength={4000} onChange={e => setText(e.target.value)} placeholder="Type @ and a full name to notify someone"/></label>
-      <div className="wf-chain"><small className="wf-hint">Mention:</small>{(people as DirectoryEntry[] | null)?.filter(p => p.id !== user.id).map(p => <button type="button" key={p.id} className="wf-chip" onClick={() => mention(p.name)}>@{p.name}</button>)}</div>
-      <button className="primary-button" disabled={busy || !text.trim()}>Post comment</button>
+      <label className="wf-field">{t("Add a comment")}<textarea value={text} maxLength={4000} onChange={e => setText(e.target.value)} placeholder={t("Type @ and a full name to notify someone")}/></label>
+      <div className="wf-chain"><small className="wf-hint">{t("Mention:")}</small>{(people as DirectoryEntry[] | null)?.filter(p => p.id !== user.id).map(p => <button type="button" key={p.id} className="wf-chip" onClick={() => mention(p.name)}>@{p.name}</button>)}</div>
+      <button className="primary-button" disabled={busy || !text.trim()}>{t("Post comment")}</button>
     </form>
     {message && <p className="form-error">{message}</p>}
   </div>;
@@ -257,12 +257,12 @@ export function CommentsPanel({ contract, user }: PanelProps) {
 export function HistoryPanel({ contract, user }: PanelProps) {
   const allowed = can(user, "audit.read");
   const { data: items, error } = useLoad(() => allowed ? api.audit(contract.id) : Promise.resolve([] as AuditItem[]), `${contract.id}-${contract.status}-${contract.validation_status}-${contract.document_version}`);
-  if (!allowed) return <div className="wf-panel"><p className="wf-hint">Your role cannot view the audit history.</p></div>;
+  if (!allowed) return <div className="wf-panel"><p className="wf-hint">{t("Your role cannot view the audit history.")}</p></div>;
   return <div className="wf-panel">
     {error && <p className="form-error">{error}</p>}
-    {items && !items.length && <p className="wf-hint">No activity recorded yet.</p>}
+    {items && !items.length && <p className="wf-hint">{t("No activity recorded yet.")}</p>}
     <ul className="wf-list wf-history">{items?.map(item => <li key={item.id}>
-      <div><strong>{item.action}</strong><small>{item.actor} · {dateTimeLabel(item.created_at)}</small><AuditDetails details={item.details}/></div>
+      <div><strong>{t(item.action)}</strong><small>{item.actor} · {dateTimeLabel(item.created_at)}</small><AuditDetails details={item.details}/></div>
     </li>)}</ul>
   </div>;
 }
