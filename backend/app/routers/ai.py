@@ -404,7 +404,8 @@ PORTFOLIO_SCHEMA = llm.obj(
 PORTFOLIO_PROMPT = """You answer questions about a company's whole contract portfolio using only the CONTRACTS,
 OBLIGATIONS and APPROVALS tables provided (one line per record, fields separated by |). Compute totals, counts and
 date comparisons exactly from the data, relative to TODAY, and show the figures you used. Totals are per currency;
-never add different currencies together. List every relevant contract in contracts (by its #id) with a short
+never add different currencies together. "part of" links SOWs, amendments, order forms and renewals to their
+main agreement: include them when asked about a whole agreement. List every relevant contract in contracts (by its #id) with a short
 reason. Set found=false when the tables cannot answer the question, and say what is missing. Keep the answer brief."""
 PORTFOLIO_LIMIT = 400
 
@@ -419,7 +420,7 @@ def portfolio_material(conn, user: dict) -> str:
         reviews[row["contract_id"]] = json.loads(row["result"])  # later rows win: latest review
     lines = ["CONTRACTS: #id | title | vendor | status | department | owner | start | end | renewal date | "
              "renewal notice deadline | currency | one-time | optional | tags | AI risks (high/medium/low) | top AI risk | "
-             "playbook deviations"]
+             "playbook deviations | part of"]
     for c in contracts:
         review = reviews.get(c["id"]) or {}
         risks = review.get("risks", [])
@@ -429,7 +430,8 @@ def portfolio_material(conn, user: dict) -> str:
                  c["project_start_date"], c["project_end_date"], c["renewal_date"], c["renewal_notice_deadline"],
                  c["currency"], c["one_time_amount"], c["optional_amount"], ", ".join(json.loads(c["tags"] or "[]")),
                  counts, top[:160],
-                 "; ".join(f"{p['title']} ({p['status']})" for p in review.get("playbook", []) if p["status"] in ("deviates", "missing"))[:200]]
+                 "; ".join(f"{p['title']} ({p['status']})" for p in review.get("playbook", []) if p["status"] in ("deviates", "missing"))[:200],
+                 f"{c['relationship']} of #{c['parent_id']}" if c["parent_id"] in allowed else ""]
         lines.append(" | ".join("" if v is None else str(v).replace("\n", " ").replace("|", "/") for v in cells))
     lines.append("\nOBLIGATIONS: contract #id | title | kind | status | due date | amount | currency | owner")
     for o in conn.execute("SELECT * FROM obligations ORDER BY due_date"):

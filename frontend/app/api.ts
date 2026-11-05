@@ -4,6 +4,7 @@ export const contractStatuses = ["Quoting", "Under Review", "Cleared to Start", 
 export const approverRoles = ["legal", "finance", "procurement", "admin"] as const;
 export const roles = ["admin", "legal", "procurement", "finance", "viewer"] as const;
 export const obligationKinds = ["Deliverable", "Payment", "Milestone", "Compliance", "Renewal", "Other"] as const;
+export const contractRelationships = ["SOW", "Amendment", "Order form", "Renewal", "Other"] as const;
 export const obligationStatuses = ["Open", "Done", "Waived"] as const;
 
 export type Permission =
@@ -66,8 +67,21 @@ export type Contract = {
   signed_at?: string | null;
   extraction_status?: "Queued" | "Running" | "Done" | "Failed" | null;
   tags: string[];
+  parent_id?: number | null;
+  relationship?: string | null;
+  child_count?: number;
   pending_approval_id: number | null;
   allowed_transitions: string[];
+};
+
+export type FamilyNode = {
+  id: number; title: string; reference_number: string | null; vendor_name: string | null; status: string;
+  relationship: string | null; currency: string | null; value: number | null;
+  project_start_date: string | null; project_end_date: string | null; children: FamilyNode[];
+};
+export type Family = {
+  root: FamilyNode; contract_id: number; count: number; active_count: number; hidden_count: number;
+  value_by_currency: { currency: string; value: number }[]; first_start: string | null; last_end: string | null;
 };
 
 export type Dashboard = {
@@ -400,6 +414,7 @@ export const api = {
   remove: (id: number) => json<{ deleted: boolean; id: number }>(`/api/contracts/${id}`, "DELETE"),
   upload: (form: FormData) => request<Contract>("/api/contracts/upload", { method: "POST", body: form }),
 
+  family: (id: number) => request<Family>(`/api/contracts/${id}/family`),
   versions: (id: number) => request<Version[]>(`/api/contracts/${id}/versions`),
   uploadVersion: (id: number, form: FormData) => request<Contract>(`/api/contracts/${id}/versions`, { method: "POST", body: form }),
 

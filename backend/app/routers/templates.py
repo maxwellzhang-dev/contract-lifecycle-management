@@ -13,7 +13,7 @@ from ..auth import current_user, require
 from ..database import add_audit, connection, utc_now
 from ..services import rag
 from ..storage import upload_dir
-from .contracts import ContractUpdate, check_dates, contract_response, normalise_tags
+from .contracts import ContractUpdate, check_dates, check_parent, contract_response, normalise_tags
 
 router = APIRouter(prefix="/api")
 
@@ -160,6 +160,8 @@ def create_contract(body: ContractCreate, user: dict = Depends(require("contract
         values["tags"] = normalise_tags(values["tags"])
     template = None
     with connection() as conn:
+        if values.get("parent_id") is not None or values.get("relationship"):
+            values["parent_id"], values["relationship"] = check_parent(conn, user, None, values.get("parent_id"), values.get("relationship"))
         if template_id is not None:
             template = conn.execute("SELECT * FROM contract_templates WHERE id=? AND active=1", (template_id,)).fetchone()
             if not template:

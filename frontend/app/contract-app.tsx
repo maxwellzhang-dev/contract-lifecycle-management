@@ -15,6 +15,7 @@ import { NewContractModal, TemplatesView } from "./templates";
 import { SignaturesPanel } from "./signatures";
 import { SharingCard } from "./access";
 import { PlaybookView } from "./playbook";
+import { FamilyCard } from "./family";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
 type View = "Overview" | "Contracts" | "AI assistant" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Playbook" | "Templates" | "Audit trail" | "Users";
@@ -56,7 +57,7 @@ function ContractTable({ contracts, onSelect }: { contracts: Contract[]; onSelec
   const showOwner = contracts.some(contract => contract.owner);
   return <div className="table-wrap"><Table><thead><tr><th>Vendor & project</th>{showOwner && <th>Owner</th>}<th>Contract value</th><th>Status</th><th>Expiry date</th><th>Validation</th><th /></tr></thead><tbody>
     {contracts.map((contract) => { const days = daysLeft(contract.project_end_date); const level = urgency(days); return <tr key={contract.id} onClick={() => onSelect(contract)} className={`click-row ${level}`}>
-      <td><div className="vendor-cell"><span className={`vendor-logo hue-${vendorHue(contract.vendor_name)}`}>{(contract.vendor_name ?? "?").slice(0, 1)}</span><div><strong>{contract.vendor_name ?? "Vendor not identified"}</strong><small>{contract.project_name ?? contract.title}</small><Tags tags={contract.tags} /></div></div></td>
+      <td><div className="vendor-cell"><span className={`vendor-logo hue-${vendorHue(contract.vendor_name)}`}>{(contract.vendor_name ?? "?").slice(0, 1)}</span><div><strong>{contract.vendor_name ?? "Vendor not identified"}</strong><small>{contract.project_name ?? contract.title}</small>{(contract.relationship || !!contract.child_count) && <span className="family-mark">{contract.relationship ? `↳ ${contract.relationship}` : `Main agreement · ${contract.child_count} linked`}</span>}<Tags tags={contract.tags} /></div></div></td>
       {showOwner && <td>{contract.owner ?? "Unassigned"}</td>}<td className="nowrap"><strong>{money(contract)}</strong></td><td><Status value={contract.status} plain /></td><td className="nowrap">{dateLabel(contract.project_end_date)}{level && days !== null && <em className="due-in">{days < 0 ? `${-days}d overdue` : days === 0 ? "Today" : `in ${days}d`}</em>}</td><td><Status value={contract.validation_status} /></td><td><button className="row-menu" aria-label="Open contract">›</button></td>
     </tr>; })}
     {!contracts.length && <tr><td colSpan={showOwner ? 7 : 6} className="empty-cell">No contracts match these filters.</td></tr>}
@@ -173,7 +174,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
     </section>
     {createOpen && <NewContractModal onClose={() => setCreateOpen(false)} onCreated={async contract => { setCreateOpen(false); await refresh(); setSelected(contract); }} />}
     {uploadOpen && <UploadModal onClose={() => setUploadOpen(false)} onComplete={async contract => { setUploadOpen(false); await refresh(); setSelected(contract); }} />}
-    {selected && <ContractDrawer key={selected.id} contract={selected} user={user} allTags={allTags} onClose={() => setSelected(null)} onSaved={async contract => { setSelected(contract); await refresh(); }} onDeleted={async () => { setSelected(null); await refresh(); }} />}
+    {selected && <ContractDrawer key={selected.id} contract={selected} user={user} allTags={allTags} contracts={contracts} onOpenContract={id => void openContract(id)} onClose={() => setSelected(null)} onSaved={async contract => { setSelected(contract); await refresh(); }} onDeleted={async () => { setSelected(null); await refresh(); }} />}
   </main>;
 }
 
@@ -278,7 +279,7 @@ const editableFields: { key: keyof Contract; label: string; type?: string; wide?
 type DrawerTab = "Details" | "AI assistant" | "Approvals" | "Signatures" | "Comments" | "Versions" | "Obligations" | "History";
 const drawerTabs: DrawerTab[] = ["Details", "AI assistant", "Approvals", "Signatures", "Comments", "Versions", "Obligations", "History"];
 
-function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }: { contract: Contract; user: User; allTags: string[]; onClose: () => void; onSaved: (c: Contract) => Promise<void>; onDeleted: () => Promise<void> }) {
+function ContractDrawer({ contract, user, allTags, contracts, onOpenContract, onClose, onSaved, onDeleted }: { contract: Contract; user: User; allTags: string[]; contracts: Contract[]; onOpenContract: (id: number) => void; onClose: () => void; onSaved: (c: Contract) => Promise<void>; onDeleted: () => Promise<void> }) {
   const [form, setForm] = useState<Contract>(contract); const [saved, setSaved] = useState<Contract>(contract); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
   const [tab, setTab] = useState<DrawerTab>(contract.pending_approval_id ? "Approvals" : "Details");
   const fileExtension = saved.file_name?.split(".").pop()?.toLowerCase();
@@ -327,6 +328,7 @@ function ContractDrawer({ contract, user, allTags, onClose, onSaved, onDeleted }
           <div className="wf-field wf-tags-field">Tags<TagEditor value={form.tags ?? []} onChange={tags => setForm({ ...form, tags })} disabled={fieldDisabled("tags")} suggestions={allTags} /></div>
           <div className="edit-grid">{editableFields.map(field => { const score = form.field_confidences?.[field.key as string]; const low = form.low_confidence_fields?.includes(field.key as string); const missing = form.missing_fields?.includes(field.key as string); const value = form[field.key]; const isLong = ["deliverables","payment_terms","notes"].includes(field.key); const disabled = fieldDisabled(field.key); return <label key={field.key} className={field.wide ? "wide" : ""}><span>{field.label}{missing ? <em className="field-flag missing">Missing</em> : low ? <em className="field-flag low">Low {score ? `${Math.round(score*100)}%` : "confidence"}</em> : score ? <em className="field-flag good">{Math.round(score*100)}%</em> : null}</span>{field.key === "status" ? <select disabled={disabled} value={String(value ?? saved.status)} onChange={e => setForm({...form,status:e.target.value})}>{contractStatuses.filter(item => statusOptions.includes(item)).map(item => <option key={item}>{item}</option>)}</select> : isLong ? <textarea disabled={disabled} value={(value as string) ?? ""} onChange={e => setForm({...form,[field.key]:e.target.value})}/> : <input disabled={disabled} type={field.type ?? "text"} value={(value as string | number) ?? ""} onChange={e => setForm({...form,[field.key]:field.type === "number" ? (e.target.value ? Number(e.target.value) : null) : e.target.value})}/>}</label>; })}</div>
           {saved.status === "Quoting" && <p className="wf-hint">To move past Quoting, validate the details and submit the contract on the Approvals tab.</p>}
+          <FamilyCard contract={saved} user={user} contracts={contracts} onChanged={changed} onOpen={onOpenContract} />
           <SharingCard contract={saved} user={user} />
         </>}
         {tab === "AI assistant" && <AiPanel {...panelProps} />}

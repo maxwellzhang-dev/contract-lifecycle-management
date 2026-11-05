@@ -777,3 +777,24 @@ nav .nav-item:nth-child(12) { --sec: var(--hue-indigo); --sec-bg: var(--hue-indi
 .playbook-suggestion .link-button{justify-self:start;display:inline-flex;align-items:center;gap:4px}
 .wf-subhead svg{vertical-align:-2px;margin-right:4px}
 @media (max-width:640px){.playbook-checks li{grid-template-columns:1fr}}
+
+/* --- contract families --- */
+.family-edit{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.family-edit select{min-height:38px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;background:#fff;max-width:100%}
+.family-edit select[aria-label="Main agreement"]{flex:1 1 220px}
+.family-edit button{display:inline-flex;align-items:center;gap:6px}
+.family-totals{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.family-totals div{border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:2px}
+.family-totals small{font-size:12px;color:var(--muted);font-weight:700}
+.family-totals strong{font-size:14px}
+.family-tree,.family-tree ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.family-tree ul{margin:6px 0 0 18px;padding-left:12px;border-left:2px solid #e3e5f0}
+.family-node{width:100%;display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 12px;font:inherit;cursor:pointer}
+.family-node:hover:not(:disabled){border-color:#b9b3ff;background:#faf9ff}
+.family-node.current{border-color:#7168e9;background:#f6f5ff;cursor:default;opacity:1}
+.family-node div{display:grid;min-width:0}
+.family-node strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.family-node small{font-size:12px;color:var(--muted)}
+.family-node b{font-size:13px;white-space:nowrap}
+@media (max-width:640px){.family-node{grid-template-columns:1fr auto}.family-node .wf-badge{grid-column:1/-1;justify-self:start}}
+.family-mark{display:block;font-size:12px;color:#5b55c9;font-weight:700;margin-top:2px}

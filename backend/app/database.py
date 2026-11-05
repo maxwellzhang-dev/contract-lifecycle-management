@@ -136,6 +136,8 @@ CREATE TABLE IF NOT EXISTS contracts (
     document_version INTEGER NOT NULL DEFAULT 1,
     signed_at TEXT,
     extraction_status TEXT,
+    parent_id INTEGER REFERENCES contracts(id) ON DELETE SET NULL,
+    relationship TEXT,
     uploaded_by TEXT,
     upload_date TEXT,
     created_at TEXT NOT NULL,
@@ -374,7 +376,8 @@ CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id)
 
 # Columns added after the first prototype release; older databases get them via ALTER TABLE.
 ADDED_COLUMNS = {
-    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT", "extraction_status": "TEXT"},
+    "contracts": {"status_before_hold": "TEXT", "tags": "TEXT NOT NULL DEFAULT '[]'", "signed_at": "TEXT", "extraction_status": "TEXT",
+                  "parent_id": "INTEGER REFERENCES contracts(id) ON DELETE SET NULL", "relationship": "TEXT"},
     "approval_requests": {"ai_review_id": "INTEGER"},
     "users": {"sso_subject": "TEXT", "department": "TEXT", "access_scope": "TEXT NOT NULL DEFAULT 'all'"},
     "ai_portfolio_questions": {"source": "TEXT NOT NULL DEFAULT 'records'"},
@@ -387,6 +390,7 @@ def migrate(conn):
         for column, kind in columns.items():
             if column not in existing:
                 conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_contract_parent ON contracts(parent_id)")
     conn.execute("UPDATE contracts SET status='Quoting' WHERE status='Draft'")
     conn.execute("UPDATE contracts SET status='In Progress' WHERE status='Active'")
     # Give every uploaded document a version 1 row so version history starts complete.

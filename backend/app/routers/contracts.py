@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
-from ..access import visibility_sql
+from ..access import can_view, visibility_sql
 from ..auth import current_user, require
 from ..database import add_audit, connection, rows_to_dicts, tag_match_sql, utc_now
 from .. import jobs
@@ -51,6 +51,8 @@ class ContractUpdate(BaseModel):
     renewal_action: str | None = None
     renewal_comments: str | None = None
     tags: list[str] | None = None
+    parent_id: int | None = None
+    relationship: str | None = None
 
 
 MAX_TAGS = 10
@@ -74,8 +76,42 @@ def normalise_tags(tags: list[str] | None) -> str:
 
 # Fields that can still change while an approval is pending; everything else is what the
 # approvers are signing off on, so it is locked until the request is withdrawn or decided.
-EDITABLE_DURING_APPROVAL = {"notes", "renewal_comments", "status", "tags"}
+EDITABLE_DURING_APPROVAL = {"notes", "renewal_comments", "status", "tags", "parent_id", "relationship"}
 DATE_FIELDS = {"project_start_date", "project_end_date", "renewal_date", "renewal_notice_deadline"}
+
+
+# --- contract families: a main agreement with its SOWs, amendments, order forms and renewals ---
+
+RELATIONSHIPS = ("SOW", "Amendment", "Order form", "Renewal", "Other")
+MAX_FAMILY_DEPTH = 4
+
+
+def check_parent(conn, user: dict, contract_id: int | None, parent_id, relationship) -> tuple[int | None, str | None]:
+    """Validate a link to a parent contract. Returns the (parent_id, relationship) to store."""
+    if parent_id is None:
+        return None, None
+    if relationship not in RELATIONSHIPS:
+        raise HTTPException(422, f"relationship must be one of: {', '.join(RELATIONSHIPS)}")
+    if parent_id == contract_id:
+        raise HTTPException(422, "A contract cannot be part of itself.")
+    if not conn.execute("SELECT 1 FROM contracts WHERE id=?", (parent_id,)).fetchone() or not can_view(conn, user, parent_id):
+        raise HTTPException(422, "The parent contract was not found.")
+    depth, current = 1, parent_id  # depth: the level this contract would sit at (main agreement = 1)
+    while current is not None:
+        if current == contract_id:
+            raise HTTPException(422, "That link would make a loop: the parent is already part of this contract.")
+        current = conn.execute("SELECT parent_id FROM contracts WHERE id=?", (current,)).fetchone()["parent_id"]
+        depth += 1
+    if contract_id is not None:
+        depth += subtree_depth(conn, contract_id)
+    if depth > MAX_FAMILY_DEPTH:
+        raise HTTPException(422, f"Contract families can be at most {MAX_FAMILY_DEPTH} levels deep.")
+    return parent_id, relationship
+
+
+def subtree_depth(conn, contract_id: int) -> int:
+    children = [r["id"] for r in conn.execute("SELECT id FROM contracts WHERE parent_id=?", (contract_id,))]
+    return 1 + max((subtree_depth(conn, c) for c in children), default=0) if children else 0
 
 
 def with_workflow(conn, rows) -> list[dict]:
@@ -85,9 +121,12 @@ def with_workflow(conn, rows) -> list[dict]:
         row["contract_id"]: row["id"]
         for row in conn.execute("SELECT id, contract_id FROM approval_requests WHERE status='Pending'")
     }
+    children = {r["parent_id"]: r["n"] for r in conn.execute(
+        "SELECT parent_id, COUNT(*) n FROM contracts WHERE parent_id IS NOT NULL GROUP BY parent_id")}
     for item, row in zip(items, rows):
         item["pending_approval_id"] = pending.get(item["id"])
         item["allowed_transitions"] = allowed_transitions(row, item["id"] in pending)
+        item["child_count"] = children.get(item["id"], 0)
         item.pop("file_path", None)  # server paths are not the client's business
     return items
 
@@ -227,6 +266,53 @@ def get_contract(contract_id: int, _: dict = Depends(current_user)):
         return contract_response(conn, contract_id)
 
 
+def family_node(row) -> dict:
+    value = (row["one_time_amount"] or 0) + (row["optional_amount"] or 0)
+    return {"id": row["id"], "title": row["title"], "reference_number": row["reference_number"],
+            "vendor_name": row["vendor_name"], "status": row["status"], "relationship": row["relationship"],
+            "currency": row["currency"], "value": round(value, 2) if row["one_time_amount"] is not None or row["optional_amount"] is not None else None,
+            "project_start_date": row["project_start_date"], "project_end_date": row["project_end_date"], "children": []}
+
+
+@router.get("/contracts/{contract_id}/family")
+def contract_family(contract_id: int, user: dict = Depends(current_user)):
+    """The main agreement this contract belongs to, everything under it, and family totals."""
+    with connection() as conn:
+        load_contract(conn, contract_id)
+        root = contract_id
+        while True:  # climb to the highest ancestor this user can see
+            parent = conn.execute("SELECT parent_id FROM contracts WHERE id=?", (root,)).fetchone()["parent_id"]
+            if parent is None or not can_view(conn, user, parent):
+                break
+            root = parent
+        nodes, hidden, frontier = {}, 0, [root]
+        nodes[root] = family_node(load_contract(conn, root))
+        while frontier:
+            marks = ",".join("?" * len(frontier))
+            rows = conn.execute(f"SELECT * FROM contracts WHERE parent_id IN ({marks}) ORDER BY COALESCE(project_start_date, '9999-12-31'), id",
+                                tuple(frontier)).fetchall()
+            frontier = []
+            for row in rows:
+                if row["id"] in nodes:
+                    continue
+                if not can_view(conn, user, row["id"]):
+                    hidden += 1
+                    continue
+                nodes[row["id"]] = family_node(row)
+                nodes[row["parent_id"]]["children"].append(nodes[row["id"]])
+                frontier.append(row["id"])
+    totals: dict[str, float] = {}
+    for node in nodes.values():
+        if node["value"] is not None and node["currency"]:
+            totals[node["currency"]] = round(totals.get(node["currency"], 0) + node["value"], 2)
+    active = [n for n in nodes.values() if n["status"] not in ("Completed", "Cancelled")]
+    ends = [n["project_end_date"] for n in nodes.values() if n["project_end_date"]]
+    starts = [n["project_start_date"] for n in nodes.values() if n["project_start_date"]]
+    return {"root": nodes[root], "contract_id": contract_id, "count": len(nodes), "active_count": len(active),
+            "hidden_count": hidden, "value_by_currency": [{"currency": c, "value": v} for c, v in sorted(totals.items())],
+            "first_start": min(starts) if starts else None, "last_end": max(ends) if ends else None}
+
+
 @router.get("/contracts/{contract_id}/file")
 def get_contract_file(contract_id: int, _: dict = Depends(current_user)):
     with connection() as conn:
@@ -268,6 +354,11 @@ def delete_contract(contract_id: int, user: dict = Depends(require("contract.del
     with connection() as conn:
         contract = load_contract(conn, contract_id)
         conn.execute("UPDATE audit_log SET contract_id=NULL WHERE contract_id=?", (contract_id,))
+        # Children move up to this contract's parent (or become main agreements).
+        if contract["parent_id"]:
+            conn.execute("UPDATE contracts SET parent_id=? WHERE parent_id=?", (contract["parent_id"], contract_id))
+        else:
+            conn.execute("UPDATE contracts SET parent_id=NULL, relationship=NULL WHERE parent_id=?", (contract_id,))
         conn.execute("DELETE FROM contracts WHERE id=?", (contract_id,))
         rag.queue_delete(conn, contract_id)
         reference = contract["reference_number"] or f"Contract #{contract_id}"
@@ -443,6 +534,13 @@ def update_contract(contract_id: int, update: ContractUpdate, user: dict = Depen
             "project_start_date": old["project_start_date"], "project_end_date": old["project_end_date"],
             **changes,
         })
+        if "parent_id" in changes or "relationship" in changes:
+            parent, relationship = check_parent(conn, user, contract_id, changes.get("parent_id", old["parent_id"]),
+                                                changes.get("relationship", old["relationship"]))
+            changes.update(parent_id=parent, relationship=relationship)
+            changes = {key: value for key, value in changes.items() if old[key] != value}
+            if not changes:
+                return contract_response(conn, contract_id)
         pending = pending_approval(conn, contract_id)
         if pending and set(changes) - EDITABLE_DURING_APPROVAL:
             raise HTTPException(409, "This contract is awaiting approval. Withdraw the approval request before editing its terms.")
@@ -489,8 +587,20 @@ def update_contract(contract_id: int, update: ContractUpdate, user: dict = Depen
             f"UPDATE contracts SET {', '.join(f'{key}=?' for key in assignments)}, missing_fields=?, low_confidence_fields=?, field_confidences=?, updated_at=? WHERE id=?",
             (*assignments.values(), json.dumps(missing_fields), json.dumps(low_confidence_fields), json.dumps(field_confidences), utc_now(), contract_id),
         )
-        details = "; ".join(f"{key}: {old[key]!r} → {value!r}" for key, value in changes.items())
-        add_audit(conn, "Status changed" if list(changes) == ["status"] else "Contract fields updated", user["name"], contract_id, details)
+        link = {k: changes.pop(k) for k in ("parent_id", "relationship") if k in changes}
+        if link:
+            parent_id = link.get("parent_id", old["parent_id"])
+            if parent_id:
+                parent = conn.execute("SELECT title FROM contracts WHERE id=?", (parent_id,)).fetchone()
+                add_audit(conn, "Contract linked", user["name"], contract_id,
+                          f"{link.get('relationship', old['relationship'])} of “{parent['title']}”")
+                add_audit(conn, "Contract linked", user["name"], parent_id,
+                          f"“{old['title']}” added as {link.get('relationship', old['relationship'])}")
+            else:
+                add_audit(conn, "Contract unlinked", user["name"], contract_id, "No longer part of another contract")
+        if changes:
+            details = "; ".join(f"{key}: {old[key]!r} → {value!r}" for key, value in changes.items())
+            add_audit(conn, "Status changed" if list(changes) == ["status"] else "Contract fields updated", user["name"], contract_id, details)
         if "status" in changes:
             notify(
                 conn, [uid for uid in contract_recipients(conn, old["owner"]) if uid != user["id"]],
