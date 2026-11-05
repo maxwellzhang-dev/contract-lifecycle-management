@@ -40,6 +40,11 @@ New uploads always start in `Quoting`. Confirming AI-extracted metadata does not
 - **Tags and advanced filters.** Up to 10 tags per contract. The contracts list filters by status, vendor, department, owner, tag, currency, total value range and end-date range, and the CSV export uses the same filters.
 - **Vendors.** One card per vendor with contract counts, value per currency, next end date and open or overdue obligations. Opening a vendor shows its contracts.
 - **Reports.** Contract counts and value per currency, grouped by department, vendor, status, owner, tag, start month or end month, with an optional date range. **Download Excel** produces a workbook with the contract list, every grouping and the obligations.
+- **Contract families.** Link a contract to its main agreement as a SOW, amendment, order form, renewal or other (up to four levels). **Details → Related contracts** shows the whole agreement as a tree with its total value per currency, invoiced amount, active count and overall dates. The contracts list marks linked contracts. Deleting a contract moves its children up one level.
+- **Invoices and contract value used.** The **Spend** tab records invoices (number, invoice and due dates, amount, status: Received, Approved, Paid, Disputed) in the contract's currency, and shows the value invoiced, paid, remaining and overdue. Disputed invoices are not counted. When invoices pass `SPEND_WARN_PERCENT` (default 80%) of the contract value, and again when they exceed it, the owner and finance are notified once. Paying an invoice linked to a payment obligation completes the obligation. Unpaid invoices due within 7 days are reminded. **Reports** lists value used across contracts. Admins, finance and procurement record invoices.
+- **Calendar subscription.** Account menu → **Calendar subscription** creates a private iCalendar link for Outlook, Google Calendar or Apple Calendar. It contains contract end dates, renewal dates and notice deadlines, open obligations and unpaid invoices for the contracts that user can see, with reminders. The link works without signing in, so only a hash of it is stored: it is shown once, can be replaced or turned off, and stops working when the user is deactivated. **Obligations → Add this contract's dates to my calendar** downloads one contract's dates as `.ics`. Set `PUBLIC_API_URL` when calendar apps should reach the API somewhere other than `PUBLIC_APP_URL/backend-api`.
+- **Microsoft Teams.** With `TEAMS_WEBHOOK_URL` set, events that notify people in Clause (approval requests and decisions, signatures, end-date, renewal, obligation and invoice reminders, spend alerts, status changes) are also posted once to a Teams channel as an Adaptive Card with an **Open in Clause** button. Create the URL in Teams with the Workflows template "Post to a channel when a webhook request is received" (an older incoming-webhook URL also works). `TEAMS_EVENTS` limits the kinds posted (comma-separated: `approval,signature,spend,expiry,renewal,renewal-notice,obligation,invoice,status`). Mentions and sharing stay personal. Everyone in the channel sees the posted contract titles whatever their access in Clause, so use a channel for the contract team. Admins see the status and can send a test message under **Users & roles**.
+- **English and Chinese interface.** Switch between English and 简体中文 from the account menu or the sign-in page (the choice is remembered per browser; the browser language is the default). Dates and numbers follow the language. AI reviews, answers, comparisons and search explanations are written in the chosen language, while quotes stay in the contract's language and suggested clause wording follows the contract. Contract data, notes and messages from the API are shown as stored. Run `npm run i18n:check` in `frontend/` to list any interface text without a translation.
 - **Templates and manual contracts.** **New** creates a contract without an upload: either a blank record, or from a template whose `{{placeholders}}` are filled in to generate a Word document (version 1). Admins and Legal manage templates. Two templates are seeded on first start.
 - Contract dashboard with lifecycle counts, renewal monitoring, and multi-currency portfolio totals.
 - Contract directory with search, status filtering, editing, CSV export, and deletion (admins only).
@@ -54,12 +59,13 @@ These features use the same Azure OpenAI deployment as extraction (`AZURE_OPENAI
 
 | Feature | Where | What it does |
 | --- | --- | --- |
-| AI review | Contract → **AI assistant** | Summary, key terms, risky clauses (high/medium/low, with the quoted clause and a suggestion), possibly missing clauses, and places where the record disagrees with the document. One click copies the document's value into the record, or adds a suggested obligation. The latest review is saved and marked out of date when a new document version is uploaded. |
+| AI review | Contract → **AI assistant** | Summary, key terms, risky clauses (high/medium/low, with the quoted clause and a suggestion), a check against the clause playbook, possibly missing clauses, and places where the record disagrees with the document. One click copies the document's value into the record, or adds a suggested obligation. The latest review is saved and marked out of date when a new document version is uploaded. |
 | Ask about this contract | Contract → **AI assistant** | Answers questions from the document and record only, with quotes, and says when the answer is not in the contract. Questions and answers are kept as history. |
 | Compare versions | Contract → **AI assistant** (2+ versions) | Lists material changes between two document versions and whether each is favourable to us. |
 | Portfolio assistant | **AI assistant** page | Questions across all contracts ("what ends next quarter and what is it worth?", "which vendors have high-risk contracts?"). Answers come from contract records, obligations, approvals and the latest AI reviews; every contract the answer relies on is linked. Totals are kept per currency. History is per user. |
 | AI review for approvers | Approvals | When a contract is submitted for approval, an AI review of the submitted document runs in the background (or the existing review of that version is reused). Approvers see the risk counts, top risks and possibly missing clauses on the approval card, and a risk chip in their inbox. A failed AI call never blocks the approval. Turn off with `AI_REVIEW_ON_SUBMIT=0`. |
 | AI search | Contracts page | Turns a plain-language request into the normal filters, using only vendors, departments, owners, tags and currencies that exist. |
+| Clause playbook | **Clause playbook** page | Legal's standard positions, each with a category, importance, the standard, an acceptable fallback and preferred wording. Every AI review checks the contract against each active rule (up to 60) and reports *meets standard*, *fallback only*, *deviates*, *missing* or *not applicable*, with the quoted clause and, for deviations and missing clauses, replacement wording to propose. Approvers see the deviations on the approval card and in their inbox. Six example rules are seeded; admins and legal manage the playbook. |
 
 Notes:
 
@@ -126,6 +132,7 @@ Slow or unreliable work runs as background jobs, stored in the database with the
 - **AI extraction**: an upload returns at once and the contract opens straight away. The details fill in on their own when the AI has read the document; validation waits until then. Anything typed in the meantime is kept.
 - **Emails**: a short SMTP outage no longer loses messages.
 - **AI review for approvers** after a contract is submitted.
+- **Teams posts**: a Teams outage only delays channel messages.
 
 Each job is retried with growing pauses (30 s, 1 min, 2 min, …). After its last attempt, extraction falls back to simple local rules so the contract is never stuck. Jobs left running by a crashed process are picked up again after 15 minutes. Jobs are claimed atomically, so several API replicas on PostgreSQL never run the same job twice. Admins can watch jobs and retry failed ones under **Users & roles → Background jobs**.
 
@@ -167,9 +174,9 @@ Roles decide what people can *do*. Each user's **Can see** setting (Users page) 
 | Role | Can do |
 | --- | --- |
 | `admin` | Everything, including deleting contracts, managing users and running reminders. Can decide any approval step and void any signature request. |
-| `legal` | Upload, create, edit, validate, submit for approval, send for signature, manage obligations and templates, decide `legal` steps |
-| `procurement` | Upload, create, edit, validate, submit for approval, send for signature, manage obligations, decide `procurement` steps |
-| `finance` | Edit, manage obligations, decide `finance` steps |
+| `legal` | Upload, create, edit, validate, submit for approval, send for signature, manage obligations, templates and the clause playbook, decide `legal` steps |
+| `procurement` | Upload, create, edit, validate, submit for approval, send for signature, manage obligations, record invoices, decide `procurement` steps |
+| `finance` | Edit, manage obligations and invoices, decide `finance` steps |
 | `viewer` | Read only, plus comments; can read saved AI reviews but not run AI features (no audit trail) |
 
 On first start, the database is seeded with these demo accounts. They all use the password from `CLAUSE_SEED_PASSWORD` (default `ChangeMe123!`):
