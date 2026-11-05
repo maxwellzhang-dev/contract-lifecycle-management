@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
-import { BarChart3, Building2, FilePlus2, FileStack, CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Sparkles, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, BookCheck, Building2, FilePlus2, FileStack, CalendarDays, CheckCircle2, SlidersHorizontal, CircleAlert, ClipboardCheck, FileText, History, LayoutDashboard, ListChecks, RefreshCw, Search, ShieldCheck, Sparkles, Stamp, Upload, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Table } from "@/components/ui/table";
@@ -14,9 +14,10 @@ import { AiPanel, AiSearch, PortfolioView } from "./ai-panel";
 import { NewContractModal, TemplatesView } from "./templates";
 import { SignaturesPanel } from "./signatures";
 import { SharingCard } from "./access";
+import { PlaybookView } from "./playbook";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
-type View = "Overview" | "Contracts" | "AI assistant" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Templates" | "Audit trail" | "Users";
+type View = "Overview" | "Contracts" | "AI assistant" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Playbook" | "Templates" | "Audit trail" | "Users";
 type PeriodMonths = 0 | 1 | 3 | 6 | 12; // 0 = any start date
 
 const navItems: { name: View; label: string; icon: LucideIcon; visible?: (user: User) => boolean }[] = [
@@ -25,6 +26,7 @@ const navItems: { name: View; label: string; icon: LucideIcon; visible?: (user: 
   { name: "Approvals", label: "Approvals", icon: Stamp }, { name: "Review queue", label: "Review queue", icon: ClipboardCheck },
   { name: "Obligations", label: "Obligations", icon: ListChecks }, { name: "Renewals", label: "Renewals", icon: RefreshCw },
   { name: "Vendors", label: "Vendors", icon: Building2 }, { name: "Reports", label: "Reports", icon: BarChart3 },
+  { name: "Playbook", label: "Clause playbook", icon: BookCheck, visible: user => can(user, "ai.use") || can(user, "playbook.manage") },
   { name: "Templates", label: "Templates", icon: FileStack, visible: user => can(user, "template.manage") },
   { name: "Audit trail", label: "Audit trail", icon: History, visible: user => can(user, "audit.read") },
   { name: "Users", label: "Users & roles", icon: Users, visible: user => can(user, "user.manage") },
@@ -162,6 +164,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
           {view === "Renewals" && <RenewalView contracts={renewals} onSelect={setSelected} />}
           {view === "Vendors" && <VendorsView onOpenVendor={vendor => { setFilters({ ...emptyFilters, vendor }); setSearch(""); setView("Contracts"); }} />}
           {view === "Reports" && <ReportsView />}
+          {view === "Playbook" && <PlaybookView user={user} />}
           {view === "Templates" && <TemplatesView />}
           {view === "Audit trail" && <AuditView items={audit} />}
           {view === "Users" && <UsersView user={user} />}

@@ -18,6 +18,7 @@ from ..services.extraction import extract_text_and_images
 from ..storage import stored_file
 from ..workflow import CONTRACT_STATUSES, OBLIGATION_KINDS
 from .contracts import load_contract
+from .playbook import active_rules, playbook_block
 
 router = APIRouter(prefix="/api")
 log = logging.getLogger("clause.ai")
@@ -44,6 +45,22 @@ REVIEW_SCHEMA = llm.obj(
         field=llm.s(enum=list(METADATA_FIELDS)), record_value=llm.s(nullable=True),
         document_value=llm.s(), quote=llm.s(nullable=True))),
 )
+PLAYBOOK_STATUSES = ["meets", "fallback", "deviates", "missing", "not_applicable"]
+PLAYBOOK_REVIEW_SCHEMA = {
+    **REVIEW_SCHEMA,
+    "properties": {**REVIEW_SCHEMA["properties"], "playbook": llm.arr(llm.obj(
+        rule_id={"type": "integer"}, status=llm.s(enum=PLAYBOOK_STATUSES), finding=llm.s(),
+        quote=llm.s(nullable=True), suggested_language=llm.s(nullable=True)))},
+    "required": [*REVIEW_SCHEMA["required"], "playbook"],
+}
+PLAYBOOK_PROMPT = """
+- playbook: one entry for EVERY rule in the COMPANY PLAYBOOK, by its rule_id. status is meets (the contract
+  satisfies the standard position), fallback (it only satisfies the acceptable fallback), deviates (the clause
+  exists but is worse than the fallback), missing (the contract has no such clause although it should), or
+  not_applicable (the rule does not apply to this kind of contract, e.g. no personal data is processed).
+  finding says briefly why. quote is the relevant contract text, null when missing. For deviates and missing,
+  suggested_language is replacement wording the customer could propose, based on the preferred wording when
+  given; otherwise null. Without document text, use not_applicable and say the document could not be read."""
 REVIEW_PROMPT = """You review a contract for a procurement and legal team.
 Return:
 - summary: 3-5 plain sentences on what is bought, from whom, for how long and for how much.
@@ -154,6 +171,32 @@ def latest_review(contract_id: int, _: dict = Depends(current_user)):
     return review
 
 
+def clean_playbook(result: dict, rules: list[dict]) -> dict:
+    """Keep one entry per active rule (in playbook order) with the rule's details attached."""
+    found = {}
+    for item in result.get("playbook") or []:
+        if item.get("rule_id") in {r["id"] for r in rules} and item["rule_id"] not in found:
+            found[item["rule_id"]] = item
+    result["playbook"] = []
+    for rule in rules:
+        item = found.get(rule["id"]) or {"status": "not_applicable", "finding": "The AI did not assess this rule.",
+                                          "quote": None, "suggested_language": None}
+        if item["status"] in ("meets", "fallback", "not_applicable"):
+            item["suggested_language"] = None
+        result["playbook"].append({**item, "rule_id": rule["id"], "title": rule["title"], "category": rule["category"],
+                                   "severity": rule["severity"], "standard": rule["standard"], "fallback": rule["fallback"]})
+    return result
+
+
+def playbook_counts(result: dict) -> dict | None:
+    if "playbook" not in result:
+        return None
+    counts = {status: 0 for status in PLAYBOOK_STATUSES}
+    for item in result["playbook"]:
+        counts[item["status"]] = counts.get(item["status"], 0) + 1
+    return counts
+
+
 def clean_review(result: dict) -> dict:
     for item in result.get("obligations", []):
         try:
@@ -171,16 +214,24 @@ def generate_review(contract_id: int, actor: str) -> dict:
     """Run an AI review of the contract's current document and store it. Raises llm.LLMUnavailable."""
     with connection() as conn:
         contract = load_contract(conn, contract_id)
+        rules = active_rules(conn)
     body, images = contract_material(contract)
-    result = clean_review(llm.structured(REVIEW_PROMPT, body, "contract_review", REVIEW_SCHEMA, images=images, effort="medium"))
+    if rules:
+        result = llm.structured(REVIEW_PROMPT + PLAYBOOK_PROMPT, body + "\n\n" + playbook_block(rules), "contract_review",
+                                PLAYBOOK_REVIEW_SCHEMA, images=images, effort="medium")
+        result = clean_playbook(clean_review(result), rules)
+    else:
+        result = clean_review(llm.structured(REVIEW_PROMPT, body, "contract_review", REVIEW_SCHEMA, images=images, effort="medium"))
     with connection() as conn:
         cursor = conn.execute(
             "INSERT INTO ai_reviews (contract_id, document_version, result, model, created_by, created_at) VALUES (?,?,?,?,?,?)",
             (contract_id, contract["document_version"], json.dumps(result), llm.model_name(), actor, utc_now()),
         )
         high = sum(r["severity"] == "high" for r in result["risks"])
+        counts = playbook_counts(result)
+        playbook_note = f"; playbook: {counts['deviates']} deviation(s), {counts['missing']} missing" if counts else ""
         add_audit(conn, "AI review generated", actor, contract_id,
-                  f"{len(result['risks'])} risk(s), {high} high; {len(result['obligations'])} obligation(s) suggested")
+                  f"{len(result['risks'])} risk(s), {high} high; {len(result['obligations'])} obligation(s) suggested{playbook_note}")
         review = review_out(conn.execute("SELECT * FROM ai_reviews WHERE id=?", (cursor.lastrowid,)).fetchone())
     review["stale"] = False
     return review
@@ -206,7 +257,9 @@ def review_brief(conn, review_id: int | None) -> dict | None:
     return {"id": row["id"], "document_version": row["document_version"], "created_at": row["created_at"],
             "summary": result.get("summary", ""), "risk_counts": counts,
             "top_risks": [{k: r[k] for k in ("category", "severity", "finding")} for r in result.get("risks", [])[:3]],
-            "missing_clauses": result.get("missing_clauses", [])}
+            "missing_clauses": result.get("missing_clauses", []), "playbook_counts": playbook_counts(result),
+            "playbook_issues": [{k: p[k] for k in ("title", "severity", "status", "finding")}
+                                for p in result.get("playbook", []) if p["status"] in ("deviates", "missing")][:5]}
 
 
 def auto_review_enabled() -> bool:
@@ -365,7 +418,8 @@ def portfolio_material(conn, user: dict) -> str:
     for row in conn.execute("SELECT contract_id, result FROM ai_reviews ORDER BY id"):
         reviews[row["contract_id"]] = json.loads(row["result"])  # later rows win: latest review
     lines = ["CONTRACTS: #id | title | vendor | status | department | owner | start | end | renewal date | "
-             "renewal notice deadline | currency | one-time | optional | tags | AI risks (high/medium/low) | top AI risk"]
+             "renewal notice deadline | currency | one-time | optional | tags | AI risks (high/medium/low) | top AI risk | "
+             "playbook deviations"]
     for c in contracts:
         review = reviews.get(c["id"]) or {}
         risks = review.get("risks", [])
@@ -374,7 +428,8 @@ def portfolio_material(conn, user: dict) -> str:
         cells = [f"#{c['id']}", c["title"], c["vendor_name"], c["status"], c["department"], c["owner"],
                  c["project_start_date"], c["project_end_date"], c["renewal_date"], c["renewal_notice_deadline"],
                  c["currency"], c["one_time_amount"], c["optional_amount"], ", ".join(json.loads(c["tags"] or "[]")),
-                 counts, top[:160]]
+                 counts, top[:160],
+                 "; ".join(f"{p['title']} ({p['status']})" for p in review.get("playbook", []) if p["status"] in ("deviates", "missing"))[:200]]
         lines.append(" | ".join("" if v is None else str(v).replace("\n", " ").replace("|", "/") for v in cells))
     lines.append("\nOBLIGATIONS: contract #id | title | kind | status | due date | amount | currency | owner")
     for o in conn.execute("SELECT * FROM obligations ORDER BY due_date"):

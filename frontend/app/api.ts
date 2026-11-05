@@ -8,7 +8,7 @@ export const obligationStatuses = ["Open", "Done", "Waived"] as const;
 
 export type Permission =
   | "contract.create" | "contract.edit" | "contract.delete" | "contract.validate"
-  | "approval.submit" | "signature.send" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use";
+  | "approval.submit" | "signature.send" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use" | "playbook.manage";
 
 export type User = {
   id: number;
@@ -132,6 +132,20 @@ export type AiReviewBrief = {
   risk_counts: RiskCounts;
   top_risks: { category: string; severity: "high" | "medium" | "low"; finding: string }[];
   missing_clauses: string[];
+  playbook_counts: PlaybookCounts | null;
+  playbook_issues: { title: string; severity: Severity; status: PlaybookStatus; finding: string }[];
+};
+
+export type Severity = "high" | "medium" | "low";
+export type PlaybookStatus = "meets" | "fallback" | "deviates" | "missing" | "not_applicable";
+export type PlaybookCounts = Record<PlaybookStatus, number>;
+export type PlaybookRule = {
+  id: number; title: string; category: string; severity: Severity; standard: string; fallback: string | null;
+  guidance: string | null; active: boolean; created_by: string | null; updated_at: string;
+};
+export type PlaybookCheck = {
+  rule_id: number; title: string; category: string; severity: Severity; standard: string; fallback: string | null;
+  status: PlaybookStatus; finding: string; quote: string | null; suggested_language: string | null;
 };
 
 export type InboxItem = {
@@ -152,6 +166,7 @@ export type InboxItem = {
   project_start_date?: string | null;
   project_end_date?: string | null;
   ai_risk_counts: RiskCounts | null;
+  ai_playbook_counts: PlaybookCounts | null;
 };
 
 export type Version = {
@@ -246,6 +261,7 @@ export type AiReviewResult = {
   obligations: { title: string; kind: string; due_date: string | null; amount: number | null; currency: string | null; quote: string | null }[];
   missing_clauses: string[];
   field_mismatches: { field: string; record_value: string | null; document_value: string; quote: string | null }[];
+  playbook?: PlaybookCheck[];
 };
 
 export type AiReview = {
@@ -416,6 +432,11 @@ export const api = {
   createTemplate: (values: Partial<Template>) => json<Template>("/api/templates", "POST", values),
   updateTemplate: (id: number, values: Partial<Template>) => json<Template>(`/api/templates/${id}`, "PATCH", values),
   createContract: (values: Record<string, unknown>) => json<Contract>("/api/contracts", "POST", values),
+
+  playbook: () => request<{ rules: PlaybookRule[]; categories: string[]; max_active: number }>("/api/playbook"),
+  createRule: (values: Partial<PlaybookRule>) => json<PlaybookRule>("/api/playbook", "POST", values),
+  updateRule: (id: number, values: Partial<PlaybookRule>) => json<PlaybookRule>(`/api/playbook/${id}`, "PATCH", values),
+  deleteRule: (id: number) => json<{ deleted: boolean }>(`/api/playbook/${id}`, "DELETE"),
 
   aiStatus: () => request<{ configured: boolean; model: string }>("/api/ai/status"),
   aiReview: (id: number) => request<AiReview | null>(`/api/contracts/${id}/ai/review`),

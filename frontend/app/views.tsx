@@ -126,7 +126,7 @@ export function ApprovalsView({ items, onOpen }: { items: InboxItem[]; onOpen: (
     {items.length ? <div className="wf-inbox">{items.map(item => <button key={item.step_id} className="wf-inbox-row" onClick={() => onOpen(item.contract_id)}>
       <span className="wf-badge">Step {item.step_order}/{item.total_steps}</span>
       <div><strong>{item.title}</strong><small>{item.vendor_name ?? "Vendor not identified"} · {roleLabel(item.role)} approval · submitted by {item.submitted_by_name} {dateLabel(item.submitted_at)}</small>{item.note && <p>“{item.note}”</p>}</div>
-      {item.ai_risk_counts ? <span className={item.ai_risk_counts.high ? "ai-sev high" : "ai-sev low"} title="Risks flagged by the AI review">AI: {item.ai_risk_counts.high} high · {item.ai_risk_counts.medium} med</span> : <span />}
+      {item.ai_risk_counts ? <span className={item.ai_risk_counts.high ? "ai-sev high" : "ai-sev low"} title="Risks flagged by the AI review">AI: {item.ai_risk_counts.high} high · {item.ai_risk_counts.medium} med{item.ai_playbook_counts && (item.ai_playbook_counts.deviates + item.ai_playbook_counts.missing) ? ` · ${item.ai_playbook_counts.deviates + item.ai_playbook_counts.missing} playbook` : ""}</span> : <span />}
       <b>{amountLabel(item.currency, (item.one_time_amount ?? 0) + (item.optional_amount ?? 0))}</b>
       <span className="wf-go">Review →</span>
     </button>)}</div> : <section className="panel"><EmptyState icon={ClipboardCheck} title="No approvals waiting" copy="When a contract reaches a step for your role, it appears here and in your notifications." /></section>}

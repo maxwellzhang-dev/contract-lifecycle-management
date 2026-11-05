@@ -10,6 +10,7 @@ import {
   type ApprovalRequest, type AuditItem, type Comment, type Contract, type DirectoryEntry, type Obligation, type User, type Version,
 } from "./api";
 import { AuditDetails, Status, amountLabel, dateLabel, dateTimeLabel, errorText, initials, roleLabel } from "./shared";
+import { PlaybookSummary, playbookStatusLabels } from "./playbook";
 
 type PanelProps = { contract: Contract; user: User; onChanged: (contract: Contract) => Promise<void> };
 
@@ -108,6 +109,8 @@ function AiBrief({ request }: { request: ApprovalRequest }) {
     <div className="ai-brief-head"><strong>AI review for approvers</strong><span className="ai-sev high">{high} high</span><span className="ai-sev medium">{medium} medium</span><span className="ai-sev low">{low} low</span></div>
     <p>{brief.summary}</p>
     {brief.top_risks.length > 0 && <ul>{brief.top_risks.map((r, i) => <li key={i}><span className={`ai-sev ${r.severity}`}>{r.severity}</span> {r.category}: {r.finding}</li>)}</ul>}
+    {brief.playbook_counts && <PlaybookSummary counts={brief.playbook_counts} />}
+    {brief.playbook_issues?.length > 0 && <ul>{brief.playbook_issues.map((p, i) => <li key={i}><span className={`playbook-status ${p.status}`}>{playbookStatusLabels[p.status]}</span> {p.title}: {p.finding}</li>)}</ul>}
     {brief.missing_clauses.length > 0 && <small>Possibly missing: {brief.missing_clauses.join(", ")}</small>}
     <small>Document v{brief.document_version} · see the AI assistant tab for quotes and details. AI output can be wrong.</small>
   </div>;

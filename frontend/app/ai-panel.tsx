@@ -5,6 +5,7 @@ import { AlertTriangle, Check, MessageSquareText, Plus, Sparkles } from "lucide-
 import { api, can, type PortfolioAnswer, type RagStatus, type AiComparison, type AiFilters, type AiQuestion, type AiReview, type Contract, type User, type Version } from "./api";
 import { SectionHeader, Status, amountLabel, dateLabel, dateTimeLabel, errorText } from "./shared";
 import { emptyFilters, type Filters } from "./filters";
+import { PlaybookResults } from "./playbook";
 
 type PanelProps = { contract: Contract; user: User; onChanged: (contract: Contract) => Promise<void> };
 
@@ -86,6 +87,8 @@ export function AiPanel({ contract, user, onChanged }: PanelProps) {
           <span className={`ai-sev ${risk.severity}`}>{risk.severity}</span>
           <div><strong>{risk.category}: {risk.finding}</strong><Quote text={risk.quote} /><p>→ {risk.recommendation}</p></div>
         </li>)}</ul> : <p className="wf-hint">No risks flagged.</p>}
+
+        {r.playbook && r.playbook.length > 0 && <PlaybookResults checks={r.playbook} />}
 
         {r.missing_clauses.length > 0 && <><h4 className="wf-subhead">Possibly missing</h4><div className="wf-chain">{r.missing_clauses.map(c => <span key={c} className="wf-chip ai-missing"><AlertTriangle size={13}/> {c}</span>)}</div></>}
 

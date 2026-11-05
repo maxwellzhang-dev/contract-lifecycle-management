@@ -741,3 +741,39 @@ nav .nav-item:nth-child(12) { --sec: var(--hue-indigo); --sec-bg: var(--hue-indi
 .job-status.running{background:#f3f1ff;color:#3f33c9}
 .job-status.queued{background:#fff1d6;color:#a15c07}
 .job-error{margin:4px 0 0;font-size:12px;color:#be123c;font-family:var(--font-geist-mono),monospace;word-break:break-word}
+
+/* --- clause playbook --- */
+.playbook-list{display:grid;gap:12px}
+.playbook-rule{padding:16px 18px;display:grid;gap:10px}
+.playbook-rule.inactive{opacity:.6}
+.playbook-rule header{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.playbook-rule header>div:first-child{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.playbook-rule h3{margin:0;font-size:16px}
+.playbook-actions{display:flex;gap:8px;align-items:center}
+.playbook-actions button{display:inline-flex;align-items:center;gap:6px}
+.playbook-terms{margin:0;display:grid;gap:8px}
+.playbook-terms div{display:grid;grid-template-columns:150px 1fr;gap:12px}
+.playbook-terms dt{font-size:12px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;padding-top:2px}
+.playbook-terms dd{margin:0;font-size:14px;line-height:1.5}
+.playbook-wording{font-family:Georgia,serif;color:#374151}
+@media (max-width:640px){.playbook-terms div{grid-template-columns:1fr;gap:2px}}
+.playbook-status{flex:0 0 auto;display:inline-block;font-size:11px;font-weight:800;padding:3px 7px;border-radius:6px;background:#eef0f3;color:#4b5565;white-space:nowrap}
+.playbook-status.meets{background:#dcfce7;color:#15803d}
+.playbook-status.fallback{background:#e0f2fe;color:#0369a1}
+.playbook-status.deviates{background:#ffe4e9;color:#be123c}
+.playbook-status.missing{background:#fff1d6;color:#a15c07}
+.playbook-summary{display:flex;flex-wrap:wrap;gap:6px}
+.playbook-checks{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.playbook-checks li{display:grid;grid-template-columns:118px 1fr;gap:10px;align-items:start;padding:10px 12px;border:1px solid var(--line);border-radius:10px}
+.playbook-checks li.deviates{border-color:#fecdd6;background:#fff7f8}
+.playbook-checks li.missing{border-color:#fde3b0;background:#fffbf2}
+.playbook-checks li.not_applicable{opacity:.7}
+.playbook-checks p{margin:4px 0 0;font-size:14px}
+.playbook-checks details{margin-top:6px;font-size:13px;color:var(--muted)}
+.playbook-checks summary{cursor:pointer;font-weight:700}
+.playbook-suggestion{margin-top:8px;padding:8px 10px;border-radius:8px;background:#fff;border:1px dashed #c9c4ff;display:grid;gap:4px}
+.playbook-suggestion small{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;color:#6d28d9}
+.playbook-suggestion p{margin:0;font-family:Georgia,serif}
+.playbook-suggestion .link-button{justify-self:start;display:inline-flex;align-items:center;gap:4px}
+.wf-subhead svg{vertical-align:-2px;margin-right:4px}
+@media (max-width:640px){.playbook-checks li{grid-template-columns:1fr}}

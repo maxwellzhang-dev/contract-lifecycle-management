@@ -355,6 +355,19 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, run_after);
+CREATE TABLE IF NOT EXISTS playbook_rules (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL,
+    severity TEXT NOT NULL DEFAULT 'medium',
+    standard TEXT NOT NULL,
+    fallback TEXT,
+    guidance TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_ai_review_contract ON ai_reviews(contract_id);
 CREATE INDEX IF NOT EXISTS idx_ai_question_contract ON ai_questions(contract_id);
 """
@@ -388,6 +401,7 @@ def migrate(conn):
 
 def init_db():
     from .auth import seed_users  # local imports: these modules import this one
+    from .routers.playbook import seed_playbook
     from .routers.templates import seed_templates
 
     with connection() as conn:
@@ -399,6 +413,7 @@ def init_db():
         migrate(conn)
         seed_users(conn)
         seed_templates(conn)
+        seed_playbook(conn)
         if conn.execute("SELECT COUNT(*) FROM contracts").fetchone()[0] == 0 and os.getenv("SEED_DEMO_DATA", "1") == "1":
             seed_contracts(conn)
 
