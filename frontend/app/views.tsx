@@ -1,12 +1,13 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Bell, CalendarClock, CheckCircle2, ClipboardCheck, KeyRound, LogOut, UserPlus } from "lucide-react";
+import { Bell, CalendarClock, CalendarPlus, CheckCircle2, ClipboardCheck, KeyRound, LogOut, UserPlus } from "lucide-react";
 import {
   accessScopes, api, can, obligationStatuses, roles, ssoLoginUrl, type AccessScope,
   type InboxItem, type Notification, type Obligation, type User,
 } from "./api";
 import { JobsPanel } from "./system";
+import { CalendarModal, TeamsCard } from "./calendar";
 import { EmptyState, SectionHeader, Status, amountLabel, dateLabel, dateTimeLabel, errorText, initials, roleLabel } from "./shared";
 
 // --- sign in -------------------------------------------------------------------------
@@ -65,6 +66,7 @@ export function AccountMenu({ user, onSignOut }: { user: User; onSignOut: () => 
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [message, setMessage] = useState("");
+  const [calendarOpen, setCalendarOpen] = useState(false);
   async function change(event: FormEvent) {
     event.preventDefault(); setMessage("");
     try { await api.changePassword(current, next); setCurrent(""); setNext(""); setChanging(false); setMessage("Password changed."); }
@@ -81,9 +83,11 @@ export function AccountMenu({ user, onSignOut }: { user: User; onSignOut: () => 
         <label className="wf-field">New password (10+ characters)<input type="password" minLength={10} required value={next} onChange={e => setNext(e.target.value)} /></label>
         <button className="primary-button">Save password</button>
       </form> : <button className="wf-menu-item" onClick={() => setChanging(true)}><KeyRound size={16}/> Change password</button>}
+      <button className="wf-menu-item" onClick={() => { setCalendarOpen(true); setOpen(false); }}><CalendarPlus size={16}/> Calendar subscription</button>
       {message && <p className="wf-hint">{message}</p>}
       <button className="wf-menu-item" onClick={onSignOut}><LogOut size={16}/> Sign out</button>
     </div>}
+    {calendarOpen && <CalendarModal onClose={() => setCalendarOpen(false)} />}
   </div>;
 }
 
@@ -232,6 +236,7 @@ export function UsersView({ user }: { user: User }) {
       <button className="secondary-button" onClick={() => resetPassword(item)}>Reset password</button>
       {item.id !== user.id && <button className={item.active ? "danger-button" : "secondary-button"} onClick={() => void run(() => api.updateUser(item.id, { active: !item.active }), `${item.name} ${item.active ? "deactivated" : "reactivated"}.`)}>{item.active ? "Deactivate" : "Reactivate"}</button>}
     </li>)}</ul></section>
+    <TeamsCard />
     <JobsPanel />
   </>;
 }

@@ -102,7 +102,7 @@ def invite(conn, request, contract, signer, link: str):
     send_email(signer["email"], subject, body, conn)
     if signer["user_id"]:
         notify(conn, [signer["user_id"]], "signature", subject, "Open the signing link in your email.", contract["id"],
-               f"sign:{signer['id']}:{request['id']}")
+               f"sign:{signer['id']}:{request['id']}", channel=False)
 
 
 def request_detail(conn, request_id: int, links: dict[int, str] | None = None) -> dict:

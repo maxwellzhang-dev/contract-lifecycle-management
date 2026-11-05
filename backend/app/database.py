@@ -374,6 +374,11 @@ CREATE TABLE IF NOT EXISTS contract_invoices (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_invoice_contract ON contract_invoices(contract_id);
+CREATE TABLE IF NOT EXISTS calendar_feeds (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS playbook_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,

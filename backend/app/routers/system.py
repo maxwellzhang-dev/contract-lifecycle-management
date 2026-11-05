@@ -10,7 +10,7 @@ from ..database import add_audit, after_commit, connection, utc_now
 
 router = APIRouter(prefix="/api")
 
-LABELS = {"extract": "AI extraction", "email": "Email", "ai_review": "AI review for approvers", "ocr": "OCR"}
+LABELS = {"extract": "AI extraction", "email": "Email", "ai_review": "AI review for approvers", "ocr": "OCR", "teams": "Teams post"}
 
 
 def job_out(row) -> dict:
@@ -82,3 +82,23 @@ def ocr_backfill(user: dict = Depends(require("user.manage"))):
             jobs.enqueue(conn, "ocr", {"contract_id": contract_id, "file_path": file_path, "then_extract": False})
         add_audit(conn, "OCR backfill started", user["name"], details=f"{len(documents)} scanned document(s) queued")
     return {"queued": len(documents)}
+
+
+# --- integrations ---------------------------------------------------------------------
+
+@router.get("/integrations")
+def integrations(_: dict = Depends(require("user.manage"))):
+    from ..services import teams
+    return {"teams": {"configured": teams.configured(), "events": sorted(teams.events())}}
+
+
+@router.post("/integrations/teams/test")
+def teams_test(user: dict = Depends(require("user.manage"))):
+    from ..services import teams
+    if not teams.configured():
+        raise HTTPException(503, "Set TEAMS_WEBHOOK_URL to a Teams Workflows (or incoming webhook) URL and restart the API.")
+    with connection() as conn:
+        jobs.enqueue(conn, "teams", {"kind": "status", "title": "Clause is connected to this channel",
+                                     "body": f"Test message sent by {user['name']}.", "contract_id": None})
+        add_audit(conn, "Teams test message", user["name"])
+    return {"queued": True}

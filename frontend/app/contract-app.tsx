@@ -126,6 +126,15 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodMonths, user]);
 
+  // Links from emails, Teams and calendars open a contract: /?contract=<id>
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get("contract"));
+    if (!id) return;
+    window.history.replaceState(null, "", window.location.pathname);
+    api.contract(id).then(c => setSelected(c)).catch(err => fail(err));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const reviewQueue = useMemo(() => contracts.filter(c => c.validation_status !== "Validated"), [contracts]);
   const renewals = useMemo(() => contracts.filter(c => c.project_end_date && !["Completed", "Cancelled"].includes(c.status)).sort((a, b) => (a.project_end_date ?? "").localeCompare(b.project_end_date ?? "")), [contracts]);
   const filtered = useMemo(() => filterContracts(contracts, search, filters), [contracts, search, filters]);

@@ -414,6 +414,7 @@ export const fileUrl = (contractId: number, version?: number) =>
 export const ssoLoginUrl = `${API_BASE}/api/auth/sso/login`;
 export const signedCopyUrl = (requestId: number) => `${API_BASE}/api/signatures/${requestId}/signed-copy`;
 export const signingDocumentUrl = (token: string) => `${API_BASE}/api/sign/${encodeURIComponent(token)}/document`;
+export const contractCalendarUrl = (contractId: number) => `${API_BASE}/api/contracts/${contractId}/calendar.ics`;
 export const previewUrl = (contractId: number, version?: number) =>
   version ? `${API_BASE}/api/contracts/${contractId}/versions/${version}/preview` : `${API_BASE}/api/contracts/${contractId}/preview`;
 
@@ -505,6 +506,12 @@ export const api = {
   readNotification: (id: number) => json<{ read: boolean }>(`/api/notifications/${id}/read`, "POST"),
   readAllNotifications: () => json<{ read: boolean }>("/api/notifications/read-all", "POST"),
   runReminders: () => json<{ created: number }>("/api/reminders/run", "POST"),
+
+  calendarStatus: () => request<{ subscribed: boolean; created_at: string | null }>("/api/calendar"),
+  createCalendarLink: () => json<{ url: string; webcal_url: string; subscribed: boolean }>("/api/calendar/token", "POST"),
+  revokeCalendarLink: () => json<{ subscribed: boolean }>("/api/calendar/token", "DELETE"),
+  integrations: () => request<{ teams: { configured: boolean; events: string[] } }>("/api/integrations"),
+  teamsTest: () => json<{ queued: boolean }>("/api/integrations/teams/test", "POST"),
 
   directory: () => request<DirectoryEntry[]>("/api/users/directory"),
   users: () => request<User[]>("/api/users"),

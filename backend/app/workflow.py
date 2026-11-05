@@ -8,6 +8,7 @@ from email.message import EmailMessage
 
 from . import jobs
 from .database import utc_now
+from .services import teams
 
 log = logging.getLogger("clause.workflow")
 
@@ -106,8 +107,9 @@ def contract_recipients(conn, *names) -> list[int]:
 
 
 def notify(conn, user_ids, kind: str, title: str, body: str | None = None,
-           contract_id: int | None = None, dedupe_key: str | None = None) -> int:
-    """Create one notification per user. With a dedupe_key, a user gets it at most once."""
+           contract_id: int | None = None, dedupe_key: str | None = None, channel: bool = True) -> int:
+    """Create one notification per user. With a dedupe_key, a user gets it at most once.
+    When anyone was notified, the event is also posted to Teams (unless `channel` is False)."""
     created = 0
     for user_id in dict.fromkeys(user_ids):
         cursor = conn.execute(
@@ -120,6 +122,8 @@ def notify(conn, user_ids, kind: str, title: str, body: str | None = None,
             email = conn.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
             if email:
                 send_email(email["email"], title, body or title, conn)
+    if created and channel:
+        teams.post(conn, kind, title, body, contract_id)
     return created
 
 

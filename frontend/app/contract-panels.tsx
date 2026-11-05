@@ -4,9 +4,9 @@
 // obligations and the contract's own history.
 
 import { FormEvent, useEffect, useState } from "react";
-import { Check, Download, Plus, Trash2, X } from "lucide-react";
+import { CalendarPlus, Check, Download, Plus, Trash2, X } from "lucide-react";
 import {
-  api, approverRoles, can, fileUrl, obligationKinds, obligationStatuses,
+  api, approverRoles, can, contractCalendarUrl, fileUrl, obligationKinds, obligationStatuses,
   type ApprovalRequest, type AuditItem, type Comment, type Contract, type DirectoryEntry, type Obligation, type User, type Version,
 } from "./api";
 import { AuditDetails, Status, amountLabel, dateLabel, dateTimeLabel, errorText, initials, roleLabel } from "./shared";
@@ -186,6 +186,7 @@ export function ObligationsPanel({ contract, user }: PanelProps) {
 
   return <div className="wf-panel">
     {error && <p className="form-error">{error}</p>}
+    <a className="secondary-button wf-ics-link" href={contractCalendarUrl(contract.id)} download><CalendarPlus size={14}/> Add this contract’s dates to my calendar (.ics)</a>
     {manage && <form className="wf-card wf-obligation-form" onSubmit={add}>
       <h3>Add obligation or milestone</h3>
       <div className="wf-grid">
