@@ -357,6 +357,23 @@ CREATE TABLE IF NOT EXISTS jobs (
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(status, run_after);
+CREATE TABLE IF NOT EXISTS contract_invoices (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    contract_id INTEGER NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    invoice_number TEXT,
+    invoice_date TEXT,
+    due_date TEXT,
+    amount REAL NOT NULL,
+    currency TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'Received',
+    paid_at TEXT,
+    obligation_id INTEGER REFERENCES obligations(id) ON DELETE SET NULL,
+    notes TEXT,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_invoice_contract ON contract_invoices(contract_id);
 CREATE TABLE IF NOT EXISTS playbook_rules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     title TEXT NOT NULL,

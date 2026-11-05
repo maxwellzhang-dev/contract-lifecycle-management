@@ -415,12 +415,15 @@ def portfolio_material(conn, user: dict) -> str:
     contracts = conn.execute(
         f"SELECT * FROM contracts WHERE {vis} ORDER BY updated_at DESC LIMIT {PORTFOLIO_LIMIT}", vparams).fetchall()
     allowed = {c["id"] for c in contracts}
+    spend = {r["contract_id"]: (round(r["invoiced"], 2), round(r["paid"], 2)) for r in conn.execute(
+        """SELECT contract_id, SUM(CASE WHEN status!='Disputed' THEN amount ELSE 0 END) invoiced,
+                  SUM(CASE WHEN status='Paid' THEN amount ELSE 0 END) paid FROM contract_invoices GROUP BY contract_id""")}
     reviews = {}
     for row in conn.execute("SELECT contract_id, result FROM ai_reviews ORDER BY id"):
         reviews[row["contract_id"]] = json.loads(row["result"])  # later rows win: latest review
     lines = ["CONTRACTS: #id | title | vendor | status | department | owner | start | end | renewal date | "
              "renewal notice deadline | currency | one-time | optional | tags | AI risks (high/medium/low) | top AI risk | "
-             "playbook deviations | part of"]
+             "playbook deviations | part of | invoiced (not disputed) | paid"]
     for c in contracts:
         review = reviews.get(c["id"]) or {}
         risks = review.get("risks", [])
@@ -431,7 +434,8 @@ def portfolio_material(conn, user: dict) -> str:
                  c["currency"], c["one_time_amount"], c["optional_amount"], ", ".join(json.loads(c["tags"] or "[]")),
                  counts, top[:160],
                  "; ".join(f"{p['title']} ({p['status']})" for p in review.get("playbook", []) if p["status"] in ("deviates", "missing"))[:200],
-                 f"{c['relationship']} of #{c['parent_id']}" if c["parent_id"] in allowed else ""]
+                 f"{c['relationship']} of #{c['parent_id']}" if c["parent_id"] in allowed else "",
+                 *spend.get(c["id"], ("", ""))]
         lines.append(" | ".join("" if v is None else str(v).replace("\n", " ").replace("|", "/") for v in cells))
     lines.append("\nOBLIGATIONS: contract #id | title | kind | status | due date | amount | currency | owner")
     for o in conn.execute("SELECT * FROM obligations ORDER BY due_date"):

@@ -194,11 +194,18 @@ def dashboard(months: int = Query(12), user: dict = Depends(current_user)):
                WHERE o.status='Open' AND c.status NOT IN ('Completed','Cancelled') AND {cvis}""",
             (today, today, cutoff, *cparams),
         ).fetchone()
+        over_budget = conn.execute(
+            f"""SELECT COUNT(*) FROM contracts c JOIN (
+                    SELECT contract_id, SUM(amount) spent FROM contract_invoices WHERE status!='Disputed' GROUP BY contract_id
+                ) i ON i.contract_id=c.id
+                WHERE i.spent > COALESCE(c.one_time_amount,0)+COALESCE(c.optional_amount,0) AND {cvis}""",
+            cparams,
+        ).fetchone()[0]
     return {
         **dict(totals), "expiring_30_days": expiring, "value_by_currency": values,
         "total_value_by_currency": total_values, "status_distribution": statuses,
         "pending_approvals": pending_approvals, "obligations_overdue": obligations["overdue"],
-        "obligations_due_30_days": obligations["due_30"],
+        "obligations_due_30_days": obligations["due_30"], "over_budget": over_budget,
     }
 
 
@@ -301,15 +308,24 @@ def contract_family(contract_id: int, user: dict = Depends(current_user)):
                 nodes[row["id"]] = family_node(row)
                 nodes[row["parent_id"]]["children"].append(nodes[row["id"]])
                 frontier.append(row["id"])
+        marks = ",".join("?" * len(nodes))
+        invoiced = {r["contract_id"]: round(r["invoiced"], 2) for r in conn.execute(
+            f"""SELECT contract_id, SUM(amount) invoiced FROM contract_invoices
+                WHERE status!='Disputed' AND contract_id IN ({marks}) GROUP BY contract_id""", tuple(nodes))}
     totals: dict[str, float] = {}
+    spent: dict[str, float] = {}
     for node in nodes.values():
+        node["invoiced"] = invoiced.get(node["id"], 0)
         if node["value"] is not None and node["currency"]:
             totals[node["currency"]] = round(totals.get(node["currency"], 0) + node["value"], 2)
+        if node["invoiced"] and node["currency"]:
+            spent[node["currency"]] = round(spent.get(node["currency"], 0) + node["invoiced"], 2)
     active = [n for n in nodes.values() if n["status"] not in ("Completed", "Cancelled")]
     ends = [n["project_end_date"] for n in nodes.values() if n["project_end_date"]]
     starts = [n["project_start_date"] for n in nodes.values() if n["project_start_date"]]
     return {"root": nodes[root], "contract_id": contract_id, "count": len(nodes), "active_count": len(active),
             "hidden_count": hidden, "value_by_currency": [{"currency": c, "value": v} for c, v in sorted(totals.items())],
+            "invoiced_by_currency": [{"currency": c, "value": v} for c, v in sorted(spent.items())],
             "first_start": min(starts) if starts else None, "last_end": max(ends) if ends else None}
 
 

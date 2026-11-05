@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Building2, Download } from "lucide-react";
 import { API_BASE, api, type CurrencyValue, type Report, type VendorSummary } from "./api";
 import { EmptyState, SectionHeader, dateLabel, errorText } from "./shared";
+import { SpendOverviewPanel } from "./invoices";
 
 function Values({ values }: { values: CurrencyValue[] }) {
   if (!values.length) return <span className="wf-muted">—</span>;
@@ -47,7 +48,7 @@ const groupOptions: { value: string; label: string }[] = [
   { value: "end_month", label: "End month" },
 ];
 
-export function ReportsView() {
+export function ReportsView({ onOpen }: { onOpen?: (id: number) => void }) {
   const [groupBy, setGroupBy] = useState("department");
   const [dateField, setDateField] = useState("start");
   const [start, setStart] = useState("");
@@ -85,5 +86,6 @@ export function ReportsView() {
       </table></div>
       {groupBy === "tag" && <p className="wf-hint">A contract with several tags is counted under each of them.</p>}
     </section>}
+    <SpendOverviewPanel onOpen={onOpen} />
   </>;
 }

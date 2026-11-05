@@ -5,11 +5,12 @@ export const approverRoles = ["legal", "finance", "procurement", "admin"] as con
 export const roles = ["admin", "legal", "procurement", "finance", "viewer"] as const;
 export const obligationKinds = ["Deliverable", "Payment", "Milestone", "Compliance", "Renewal", "Other"] as const;
 export const contractRelationships = ["SOW", "Amendment", "Order form", "Renewal", "Other"] as const;
+export const invoiceStatuses = ["Received", "Approved", "Paid", "Disputed"] as const;
 export const obligationStatuses = ["Open", "Done", "Waived"] as const;
 
 export type Permission =
   | "contract.create" | "contract.edit" | "contract.delete" | "contract.validate"
-  | "approval.submit" | "signature.send" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use" | "playbook.manage";
+  | "approval.submit" | "signature.send" | "obligation.manage" | "audit.read" | "user.manage" | "reminders.run" | "template.manage" | "ai.use" | "playbook.manage" | "invoice.manage";
 
 export type User = {
   id: number;
@@ -77,11 +78,29 @@ export type Contract = {
 export type FamilyNode = {
   id: number; title: string; reference_number: string | null; vendor_name: string | null; status: string;
   relationship: string | null; currency: string | null; value: number | null;
-  project_start_date: string | null; project_end_date: string | null; children: FamilyNode[];
+  project_start_date: string | null; project_end_date: string | null; invoiced: number; children: FamilyNode[];
 };
 export type Family = {
   root: FamilyNode; contract_id: number; count: number; active_count: number; hidden_count: number;
-  value_by_currency: { currency: string; value: number }[]; first_start: string | null; last_end: string | null;
+  value_by_currency: { currency: string; value: number }[]; invoiced_by_currency: { currency: string; value: number }[];
+  first_start: string | null; last_end: string | null;
+};
+
+export type SpendLevel = "ok" | "warning" | "over" | "unknown";
+export type Spend = {
+  currency: string | null; budget: number | null; invoiced: number; paid: number; unpaid: number; disputed: number;
+  overdue: number; remaining: number | null; percent: number | null; level: SpendLevel; warn_percent: number; invoice_count: number;
+};
+export type Invoice = {
+  id: number; contract_id: number; invoice_number: string | null; invoice_date: string | null; due_date: string | null;
+  amount: number; currency: string; status: (typeof invoiceStatuses)[number]; paid_at: string | null;
+  obligation_id: number | null; obligation_title: string | null; notes: string | null; created_by: string; overdue: boolean;
+};
+export type SpendOverview = {
+  items: { contract_id: number; title: string; vendor_name: string | null; status: string; currency: string | null; budget: number | null;
+    invoiced: number; paid: number; percent: number | null; remaining: number | null; level: SpendLevel; invoice_count: number }[];
+  totals: { currency: string; budget: number; invoiced: number; paid: number }[];
+  warn_percent: number; counts: Record<SpendLevel, number>;
 };
 
 export type Dashboard = {
@@ -97,6 +116,7 @@ export type Dashboard = {
   pending_approvals: number;
   obligations_overdue: number;
   obligations_due_30_days: number;
+  over_budget?: number;
   value_by_currency: { currency: string; value: number }[];
   total_value_by_currency: { currency: string; value: number }[];
   status_distribution: { status: string; count: number }[];
@@ -414,6 +434,11 @@ export const api = {
   remove: (id: number) => json<{ deleted: boolean; id: number }>(`/api/contracts/${id}`, "DELETE"),
   upload: (form: FormData) => request<Contract>("/api/contracts/upload", { method: "POST", body: form }),
 
+  invoices: (id: number) => request<{ spend: Spend; items: Invoice[] }>(`/api/contracts/${id}/invoices`),
+  createInvoice: (id: number, values: Partial<Invoice>) => json<Invoice>(`/api/contracts/${id}/invoices`, "POST", values),
+  updateInvoice: (id: number, values: Partial<Invoice>) => json<Invoice>(`/api/invoices/${id}`, "PATCH", values),
+  deleteInvoice: (id: number) => json<{ deleted: boolean }>(`/api/invoices/${id}`, "DELETE"),
+  spend: (level = "") => request<SpendOverview>(`/api/spend${level ? `?level=${level}` : ""}`),
   family: (id: number) => request<Family>(`/api/contracts/${id}/family`),
   versions: (id: number) => request<Version[]>(`/api/contracts/${id}/versions`),
   uploadVersion: (id: number, form: FormData) => request<Contract>(`/api/contracts/${id}/versions`, { method: "POST", body: form }),

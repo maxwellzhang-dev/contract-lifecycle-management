@@ -798,3 +798,27 @@ nav .nav-item:nth-child(12) { --sec: var(--hue-indigo); --sec-bg: var(--hue-indi
 .family-node b{font-size:13px;white-space:nowrap}
 @media (max-width:640px){.family-node{grid-template-columns:1fr auto}.family-node .wf-badge{grid-column:1/-1;justify-self:start}}
 .family-mark{display:block;font-size:12px;color:#5b55c9;font-weight:700;margin-top:2px}
+
+/* --- spend tracking --- */
+.spend-meter{position:relative;height:12px;border-radius:999px;background:#eef0f6;overflow:hidden}
+.spend-meter span{position:absolute;left:0;top:0;bottom:0;border-radius:999px}
+.spend-meter .spend-invoiced{background:#a5b4fc}
+.spend-meter .spend-paid{background:#4f46e5}
+.spend-meter.warning .spend-invoiced{background:#fcd34d}.spend-meter.warning .spend-paid{background:#d97706}
+.spend-meter.over .spend-invoiced{background:#fda4af}.spend-meter.over .spend-paid{background:#e11d48}
+.spend-meter i{position:absolute;top:-2px;bottom:-2px;width:2px;background:#1f2937;opacity:.35}
+.spend-figures{margin:0;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px}
+.spend-figures div{display:grid;gap:2px}
+.spend-figures dt{font-size:12px;color:var(--muted);font-weight:700}
+.spend-figures dd{margin:0;font-weight:800;font-size:15px}
+.negative{color:#be123c!important}
+.spend-flag{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:800;padding:4px 8px;border-radius:6px;white-space:nowrap}
+.spend-flag.over{background:#ffe4e9;color:#be123c}
+.spend-flag.warning{background:#fff1d6;color:#a15c07}
+.invoice-list select{min-height:34px;border:1px solid var(--line);border-radius:8px;padding:0 8px;font:inherit;background:#fff}
+.spend-overview{margin-top:18px}
+.spend-overview .panel-title{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}
+.spend-overview .panel-title select{min-height:36px;border:1px solid var(--line);border-radius:8px;padding:0 10px;font:inherit;background:#fff}
+.spend-overview .family-totals{margin:0 0 14px}
+.spend-cell{min-width:140px}
+.spend-cell small{font-size:12px;color:var(--muted)}

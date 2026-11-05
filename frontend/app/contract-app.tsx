@@ -16,6 +16,7 @@ import { SignaturesPanel } from "./signatures";
 import { SharingCard } from "./access";
 import { PlaybookView } from "./playbook";
 import { FamilyCard } from "./family";
+import { SpendPanel } from "./invoices";
 import { AccountMenu, ApprovalsView, LoginScreen, NotificationsMenu, ObligationsView, UsersView } from "./views";
 
 type View = "Overview" | "Contracts" | "AI assistant" | "Approvals" | "Review queue" | "Obligations" | "Renewals" | "Vendors" | "Reports" | "Playbook" | "Templates" | "Audit trail" | "Users";
@@ -164,7 +165,7 @@ function Workspace({ user, onSignedOut }: { user: User; onSignedOut: () => void 
           {view === "Obligations" && <ObligationsView key={refreshKey} user={user} onOpen={id => void openContract(id)} />}
           {view === "Renewals" && <RenewalView contracts={renewals} onSelect={setSelected} />}
           {view === "Vendors" && <VendorsView onOpenVendor={vendor => { setFilters({ ...emptyFilters, vendor }); setSearch(""); setView("Contracts"); }} />}
-          {view === "Reports" && <ReportsView />}
+          {view === "Reports" && <ReportsView onOpen={id => void openContract(id)} />}
           {view === "Playbook" && <PlaybookView user={user} />}
           {view === "Templates" && <TemplatesView />}
           {view === "Audit trail" && <AuditView items={audit} />}
@@ -198,6 +199,7 @@ function Overview({ dashboard, contracts, inbox, onSelect, onNavigate }: { dashb
     { text: expiring.length ? `${expiring.length} expiring within 30 days` : "Nothing expiring in 30 days", tone: expiring.length ? "rose" : "green" },
     { text: `${active} active`, tone: active ? "green" : "slate" },
     ...(inbox.length ? [{ text: `${inbox.length} approval${inbox.length === 1 ? "" : "s"} waiting for you`, tone: "amber" }] : []),
+    ...(dashboard.over_budget ? [{ text: `${dashboard.over_budget} over budget`, tone: "rose" }] : []),
     ...(dashboard.obligations_overdue ? [{ text: `${dashboard.obligations_overdue} overdue obligation${dashboard.obligations_overdue === 1 ? "" : "s"}`, tone: "rose" }] : []),
   ];
   const keyDates = contracts.flatMap(contract => [
@@ -276,8 +278,8 @@ const editableFields: { key: keyof Contract; label: string; type?: string; wide?
   {key:"title",label:"Contract title",wide:true},{key:"reference_number",label:"Reference number"},{key:"vendor_name",label:"Vendor name"},{key:"project_name",label:"Project / scope",wide:true},{key:"phase",label:"Phase"},{key:"status",label:"Contract status"},{key:"project_start_date",label:"Start date",type:"date"},{key:"project_end_date",label:"End date",type:"date"},{key:"renewal_date",label:"Renewal date",type:"date"},{key:"currency",label:"Currency"},{key:"one_time_amount",label:"One-time amount",type:"number"},{key:"optional_amount",label:"Optional amount",type:"number"},{key:"vendor_contact",label:"Vendor contact"},{key:"internal_contact",label:"Internal contact"},{key:"department",label:"Department"},{key:"owner",label:"Contract owner"},{key:"deliverables",label:"Deliverables / services",wide:true},{key:"payment_terms",label:"Payment terms",wide:true},{key:"notes",label:"Notes",wide:true},
 ];
 
-type DrawerTab = "Details" | "AI assistant" | "Approvals" | "Signatures" | "Comments" | "Versions" | "Obligations" | "History";
-const drawerTabs: DrawerTab[] = ["Details", "AI assistant", "Approvals", "Signatures", "Comments", "Versions", "Obligations", "History"];
+type DrawerTab = "Details" | "AI assistant" | "Approvals" | "Signatures" | "Comments" | "Versions" | "Obligations" | "Spend" | "History";
+const drawerTabs: DrawerTab[] = ["Details", "AI assistant", "Approvals", "Signatures", "Comments", "Versions", "Obligations", "Spend", "History"];
 
 function ContractDrawer({ contract, user, allTags, contracts, onOpenContract, onClose, onSaved, onDeleted }: { contract: Contract; user: User; allTags: string[]; contracts: Contract[]; onOpenContract: (id: number) => void; onClose: () => void; onSaved: (c: Contract) => Promise<void>; onDeleted: () => Promise<void> }) {
   const [form, setForm] = useState<Contract>(contract); const [saved, setSaved] = useState<Contract>(contract); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
@@ -337,6 +339,7 @@ function ContractDrawer({ contract, user, allTags, contracts, onOpenContract, on
         {tab === "Comments" && <CommentsPanel {...panelProps} />}
         {tab === "Versions" && <VersionsPanel {...panelProps} />}
         {tab === "Obligations" && <ObligationsPanel {...panelProps} />}
+        {tab === "Spend" && <SpendPanel contract={saved} user={user} />}
         {tab === "History" && <HistoryPanel {...panelProps} />}
       </div></div>
     <footer>{can(user, "contract.delete") && <button className="danger-button" onClick={remove} disabled={busy}>Delete contract</button>}<div>{message && <span className="save-message">{message}</span>}</div>

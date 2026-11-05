@@ -219,4 +219,22 @@ def run_reminders(conn, today: date | None = None) -> int:
             f"{item['kind']} for {item['contract_title']} · due {item['due_date']}",
             item["contract_id"], f"obligation:{item['id']}:{item['due_date']}:{'overdue' if overdue else 'soon'}",
         )
+    invoices = conn.execute(
+        """SELECT i.*, c.title contract_title, c.owner contract_owner FROM contract_invoices i
+           JOIN contracts c ON c.id = i.contract_id
+           WHERE i.status IN ('Received','Approved') AND i.due_date IS NOT NULL AND c.status != 'Cancelled'"""
+    ).fetchall()
+    for item in invoices:
+        days = _days(item["due_date"], today)
+        if days is None or days > 7:
+            continue
+        overdue = days < 0
+        label = item["invoice_number"] or f"#{item['id']}"
+        title = (f"Invoice {label} for {item['contract_title']} is overdue" if overdue
+                 else f"Invoice {label} for {item['contract_title']} is due {'today' if days == 0 else f'in {days} days'}")
+        created += notify(
+            conn, users_with_roles(conn, ("finance",)) or contract_recipients(conn, item["contract_owner"]), "invoice", title,
+            f"{item['currency']} {item['amount']:,.2f} · due {item['due_date']} · {item['status']}",
+            item["contract_id"], f"invoice:{item['id']}:{item['due_date']}:{'overdue' if overdue else 'soon'}",
+        )
     return created

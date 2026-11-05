@@ -66,6 +66,7 @@ def visible_ids(conn, user: dict) -> set[int] | None:
 _OWNERS = {
     "obligation_id": "SELECT contract_id FROM obligations WHERE id=?",
     "comment_id": "SELECT contract_id FROM contract_comments WHERE id=?",
+    "invoice_id": "SELECT contract_id FROM contract_invoices WHERE id=?",
 }
 
 

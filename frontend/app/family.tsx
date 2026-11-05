@@ -65,6 +65,7 @@ export function FamilyCard({ contract, user, contracts, onChanged, onOpen }: {
     {family && !single && <>
       <div className="family-totals">
         <div><small>Total value</small><strong>{family.value_by_currency.length ? family.value_by_currency.map(v => amountLabel(v.currency, v.value)).join(" · ") : "—"}</strong></div>
+        {family.invoiced_by_currency.length > 0 && <div><small>Invoiced</small><strong>{family.invoiced_by_currency.map(v => amountLabel(v.currency, v.value)).join(" · ")}</strong></div>}
         <div><small>Active</small><strong>{family.active_count} of {family.count}</strong></div>
         <div><small>Runs</small><strong>{dateLabel(family.first_start)} → {dateLabel(family.last_end)}</strong></div>
       </div>
